@@ -6,7 +6,7 @@
    "javascript": [
       "App.js",
       "https://cdnjs.cloudflare.com/ajax/libs/async/1.22/async.min.js",
-      "http://momentjs.com/downloads/moment.min.js"
+      "lib/moment.js"
    ],
    "css": [
       "app.css"

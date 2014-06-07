@@ -30,29 +30,36 @@ Ext.define('CustomApp', {
 
     	async.map( configs, app.wsapiQuery, function(err,results) {
 
-    		// do something with the two results
-    		console.log("first release",results[0]);
-    		console.log("second release",results[1]);
-    		var r1 = results[0][0].raw.ReleaseStartDate;
-    		var r2 = results[1][0].raw.ReleaseDate;
-    		app.releaseExtent = { start : r1, end : r2};
-    		console.log(r1,r2);
+    		console.log ("Results",results);
 
-    		var configs = [];
-    		configs.push({ 	
-				model : "Release",
-				fetch : true,
-				filters : [ 
-					{ property:"ReleaseStartDate", operator:">=", value : r1 },
-					{ property:"ReleaseDate", operator:"<=", value : r2 }
-				]
-    		});
+    		if (results[0].length === 0 || results[1].length === 0) {
+    			app.add({html:"Unable to find start or end release"});  			
+    		} else {
 
-    		async.map( configs, app.wsapiQuery, function(err,results) {
-    			console.log("all releases",results[0].length,results[0]);
-    			app.releases = results[0];
-    			app.queryIterations();
-    		});
+	    		// do something with the two results
+	    		console.log("first release",results[0]);
+	    		console.log("second release",results[1]);
+	    		var r1 = results[0][0].raw.ReleaseStartDate;
+	    		var r2 = results[1][0].raw.ReleaseDate;
+	    		app.releaseExtent = { start : r1, end : r2};
+	    		console.log(r1,r2);
+
+	    		var configs = [];
+	    		configs.push({ 	
+					model : "Release",
+					fetch : true,
+					filters : [ 
+						{ property:"ReleaseStartDate", operator:">=", value : r1 },
+						{ property:"ReleaseDate", operator:"<=", value : r2 }
+					]
+	    		});
+
+	    		async.map( configs, app.wsapiQuery, function(err,results) {
+	    			console.log("all releases",results[0].length,results[0]);
+	    			app.releases = results[0];
+	    			app.queryIterations();
+	    		});
+	    	}
     	});
     },
 
@@ -267,7 +274,7 @@ Ext.define('CustomApp', {
 
         ];
 
-        return values.concat(checkValues);
+        return values;
     },
 
 
