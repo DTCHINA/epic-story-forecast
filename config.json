@@ -6,7 +6,8 @@
    "javascript": [
       "App.js",
       "https://cdnjs.cloudflare.com/ajax/libs/async/1.22/async.min.js",
-      "lib/moment.js"
+      "lib/moment.js",
+      "lib/regression.min.js"
    ],
    "css": [
       "app.css"
