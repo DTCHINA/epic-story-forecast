@@ -5,12 +5,12 @@ Ext.define('CustomApp', {
     componentCls: 'app',
     items:{ html:'<a href="https://help.rallydev.com/apps/2.0rc2/doc/">App SDK 2.0rc2 Docs</a>'},
 
-    seriesIterationPlanned : 0,
-    seriesIterationAccepted : 1,
-    seriesRemaining : 2,
-    seriesPlanned : 3,
-    seriesProjected : 4,
-    seriesIdeal : 5,
+    seriesIterationPlanned : 1,
+    seriesIterationAccepted : 2,
+    seriesRemaining : 3,
+    seriesPlanned : 4,
+    seriesProjected : 5,
+    seriesIdeal : 6,
 
     launch: function() {
     	app = this;
@@ -235,6 +235,35 @@ Ext.define('CustomApp', {
 	    		}
     		})
     	});
+
+    	console.log("currentIdx",currentIdx);
+    	// planned
+    	series.push( {
+    		name : 'planned',
+    		dashStyle: 'dash',
+    		data : _.map( app.conIterations, function(i,x) {
+
+    			if ( currentIdx!==-1 && x < currentIdx-1) {
+    				return null;
+    			} else {
+    				if (x >= currentIdx) {
+	    				var planned = _.reduce( series[app.seriesIterationPlanned].data.slice(currentIdx,x+1), function(sum,v) {
+		    					return sum + v;
+						},0);
+						console.log("x,planned",x,planned);
+    				}	
+    				return app.epicStory.get("PlanEstimate") -
+	    				previouslyAccepted -
+	    				_.reduce( series[app.seriesIterationAccepted].data.slice(0,x), function(sum,v) { 
+	    					return sum + v;
+	    				},0) -
+	    				_.reduce( series[app.seriesIterationPlanned].data.slice(currentIdx,x+1), function(sum,v) {
+	    					return sum + v;
+	    				},0);
+	    		}
+    		})
+    	});
+
     	app.showChart(series);
 
     },
