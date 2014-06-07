@@ -1,0 +1,14 @@
+{
+   "name": "epic-story-forecast",
+   "className": "CustomApp",
+   "server": "https://rally1.rallydev.com",
+   "sdk": "2.0rc2",
+   "javascript": [
+      "App.js",
+      "https://cdnjs.cloudflare.com/ajax/libs/async/1.22/async.min.js",
+      "http://momentjs.com/downloads/moment.min.js"
+   ],
+   "css": [
+      "app.css"
+   ]
+}

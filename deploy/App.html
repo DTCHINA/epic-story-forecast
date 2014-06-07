@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>epic-story-forecast</title>
+
+    <script type="text/javascript" src="/apps/2.0rc2/sdk.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/async/1.22/async.min.js"></script>
+    <script type="text/javascript" src="http://momentjs.com/downloads/moment.min.js"></script>
+
+    <script type="text/javascript">
+        Rally.onReady(function () {
+                var app=null;Ext.define("CustomApp",{extend:"Rally.app.App",componentCls:"app",items:{html:'<a href="https://help.rallydev.com/apps/2.0rc2/doc/">App SDK 2.0rc2 Docs</a>'},launch:function(){app=this,console.log("launched!"),app.queryReleases()},queryReleases:function(){var startReleaseName=app.getSetting("startRelease"),endReleaseName=app.getSetting("endRelease"),configs=[];configs.push({model:"Release",fetch:!0,filters:[{property:"Name",operator:"=",value:startReleaseName}]}),configs.push({model:"Release",fetch:!0,filters:[{property:"Name",operator:"=",value:endReleaseName}]}),async.map(configs,app.wsapiQuery,function(err,results){console.log("first release",results[0]),console.log("second release",results[1]);var r1=results[0][0].raw.ReleaseStartDate,r2=results[1][0].raw.ReleaseDate;app.releaseExtent={start:r1,end:r2},console.log(r1,r2);var configs=[];configs.push({model:"Release",fetch:!0,filters:[{property:"ReleaseStartDate",operator:">=",value:r1},{property:"ReleaseDate",operator:"<=",value:r2}]}),async.map(configs,app.wsapiQuery,function(err,results){console.log("all releases",results[0].length,results[0]),app.releases=results[0],app.queryIterations()})})},queryIterations:function(){var configs=[];configs.push({model:"Iteration",fetch:!0,filters:[{property:"StartDate",operator:">=",value:app.releaseExtent.start},{property:"EndDate",operator:"<=",value:app.releaseExtent.end}]}),async.map(configs,app.wsapiQuery,function(err,results){console.log("iterations",results[0]),app.iterations=results[0],app.createChartSeries()})},consolidateTimeboxByName:function(timeboxes){var groups=_.groupBy(timeboxes,function(i){return i.get("Name")}),values=_.values(groups),consolidated=_.map(values,function(v){return v[0]});return consolidated},lastReleaseIteration:function(release){console.log("last release",release);var iterations=_.filter(app.conIterations,function(i){var id=Rally.util.DateTime.fromIsoString(i.raw.EndDate),rsd=Rally.util.DateTime.fromIsoString(release.raw.ReleaseStartDate),red=Rally.util.DateTime.fromIsoString(release.raw.ReleaseDate);return id>=rsd&&red>=id});return console.log("last release iterations",iterations),iterations=_.sortBy(iterations,function(i){return i.get("EndDate")}),_.last(iterations)},createChartSeries:function(){var series=[];app.conIterations=app.consolidateTimeboxByName(app.iterations),console.log("con it",_.map(app.conIterations,function(c){return c.get("Name")})),series.push({data:_.map(app.conIterations,function(i){return i.get("Name")})}),series.push({data:_.map(app.conIterations,function(i){return 10})}),app.showChart(series)},showChart:function(series){console.log("series",series);var that=this,chart=this.down("#chart1");null!==chart&&chart.removeAll();var plotlines=app.createPlotLines(series),tickInterval=140>=series[1].data.length?7:series[1].data.length/20,extChart=Ext.create("Rally.ui.chart.Chart",{columnWidth:1,itemId:"chart1",chartData:{categories:series[0].data,series:series.slice(1,series.length)},chartColors:["Gray","Orange","LightGray","LightGray","LightGray","Blue","Green"],chartConfig:{chart:{},title:{text:"",x:-20},plotOptions:{series:{marker:{radius:5}}},xAxis:{plotLines:plotlines,type:"datetime"},yAxis:{title:{},plotLines:[{value:0,width:1,color:"#808080"}]},tooltip:{},legend:{align:"center",verticalAlign:"bottom"}}});this.add(extChart)},createPlotLines:function(seriesData){var itPlotLines=_.map(seriesData[0].data,function(i,x){return{dashStyle:"Dot",color:"grey",width:1,value:x}});app.conReleases=app.consolidateTimeboxByName(app.releases);var rePlotLines=_.map(app.conReleases,function(r){var iteration=app.lastReleaseIteration(r);if(_.isUndefined(iteration)||_.isNull(iteration))return{};var index=_.indexOf(seriesData[0].data,iteration.get("Name"));return console.log("iteration index",iteration,index),{color:"grey",width:1,value:index}});return itPlotLines.concat(rePlotLines)},config:{defaultSettings:{startRelease:"Release 1",endRelease:"Release 7",hardeningSprints:0,epicStoryId:""}},getSettingsFields:function(){var values=[{name:"epicStoryId",xtype:"rallytextfield",label:"Epic Story ID eg. 'US921'"},{name:"startRelease",xtype:"rallytextfield",label:"First Relase in Chart Range"},{name:"endRelease",xtype:"rallytextfield",label:"Last Relase in Chart Range"},{name:"hardeningSprints",xtype:"rallytextfield",label:"Last Relase in Chart Range"}];return values.concat(checkValues)},wsapiQuery:function(config,callback){Ext.create("Rally.data.WsapiDataStore",{autoLoad:!0,limit:"Infinity",model:config.model,fetch:config.fetch,filters:config.filters,listeners:{scope:this,load:function(store,data){callback(null,data)}}})}});
+
+            Rally.launchApp('CustomApp', {
+                name:"epic-story-forecast",
+	            parentRepos:""
+            });
+
+        });
+    </script>
+
+
+    <style type="text/css">
+        .app {
+     /* Add app styles here */
+}
+
+    </style>
+</head>
+<body></body>
+</html>
