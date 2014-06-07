@@ -201,6 +201,12 @@ Ext.define('CustomApp', {
 			})
     	});
 
+    	var lastPlannedIdx = 
+    		_.findLastIndex(series[app.seriesIterationPlanned].data, function(v) {
+    			return v > 0;
+    		});
+    	console.log("lpi",lastPlannedIdx);
+
     	// iteration accepted
     	series.push( {
     		name : 'accepted',
@@ -243,15 +249,9 @@ Ext.define('CustomApp', {
     		dashStyle: 'dash',
     		data : _.map( app.conIterations, function(i,x) {
 
-    			if ( currentIdx!==-1 && x < currentIdx-1) {
+    			if ( currentIdx!==-1 && (x < currentIdx-1 || x > lastPlannedIdx)) {
     				return null;
     			} else {
-    				if (x >= currentIdx) {
-	    				var planned = _.reduce( series[app.seriesIterationPlanned].data.slice(currentIdx,x+1), function(sum,v) {
-		    					return sum + v;
-						},0);
-						console.log("x,planned",x,planned);
-    				}	
     				return app.epicStory.get("PlanEstimate") -
 	    				previouslyAccepted -
 	    				_.reduce( series[app.seriesIterationAccepted].data.slice(0,x), function(sum,v) { 
