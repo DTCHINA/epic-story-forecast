@@ -3,7 +3,7 @@ var app = null;
 Ext.define('CustomApp', {
 	extend: 'Rally.app.App',
 	componentCls: 'app',
-	items:{ html:'<a href="https://help.rallydev.com/apps/2.0rc2/doc/">App SDK 2.0rc2 Docs</a>'},
+	// items:{ html:'<a href="https://help.rallydev.com/apps/2.0rc2/doc/">App SDK 2.0rc2 Docs</a>'},
 
 	seriesIterationPlanned : 1,
 	seriesIterationAccepted : 2,
@@ -228,7 +228,7 @@ Ext.define('CustomApp', {
 
 		// iteration accepted
 		series.push( {
-			name : 'accepted',
+			name : 'Accepted',
 			type : 'column',
 			data : _.map( app.conIterations, function(i) {
 				
@@ -245,7 +245,7 @@ Ext.define('CustomApp', {
 
 		// remaining
 		series.push( {
-			name : 'remaining',
+			name : 'Remaining',
 			data : _.map( app.conIterations, function(i,x) {
 
 				if ( currentIdx!==-1 && x >= currentIdx) {
@@ -263,7 +263,7 @@ Ext.define('CustomApp', {
 		console.log("currentIdx",currentIdx);
 		// planned
 		series.push( {
-			name : 'planned',
+			name : 'Planned',
 			dashStyle: 'dash',
 			data : _.map( app.conIterations, function(i,x) {
 
@@ -283,7 +283,7 @@ Ext.define('CustomApp', {
 		});
 
 		series.push( {
-			name : 'regression-accepted',
+			name : 'Regression(Accepted)',
 			dashStyle: 'dash',
 			data : function(){
 				// var a = _.compact(series[app.seriesIterationAccepted].data);
@@ -308,7 +308,7 @@ Ext.define('CustomApp', {
 		});
 
 		series.push( {
-			name : 'regression-planned',
+			name : 'Regression(Planned)',
 			dashStyle: 'dash',
 			data : function(){
 				var a = _.map(series[app.seriesIterationAccepted].data,function(v,x){
@@ -338,6 +338,23 @@ Ext.define('CustomApp', {
 			}()
 		});
 
+		// ideal
+		series.push( {
+			name : 'Ideal',
+			dashStyle: 'dash',
+			data : function() {
+				var startValue = app.epicStory.get("PlanEstimate") - previouslyAccepted;
+				var stepValue = startValue / ( app.conIterations.length - (parseInt(app.getSetting("hardeningSprints"))+1));
+				console.log(startValue,stepValue);
+				var arr = [];
+				for ( var x = 0 ; x < app.conIterations.length ; x++) {
+					var ideal = (startValue - (x * stepValue));
+					arr.push( ideal > 0 ? ideal : null);
+				}
+				arr[ _.findIndex(arr,function(a){return a===null})] = 0;
+				return arr;
+			}()
+		});
 
 		app.showChart(series);
 
@@ -354,7 +371,7 @@ Ext.define('CustomApp', {
 		var plotlines = app.createPlotLines(series);
 		
 		// set the tick interval
-		var tickInterval = series[1].data.length <= (7*20) ? 7 : (series[1].data.length / 20);
+		var tickInterval = series[1].data.length <= (25) ? 1 : Math.ceil((series[1].data.length / 25));
 
 		var extChart = Ext.create('Rally.ui.chart.Chart', {
 			columnWidth : 1,
@@ -383,10 +400,11 @@ Ext.define('CustomApp', {
 					}
 				},
 				xAxis: {
+					tickInterval : tickInterval,
 					plotLines : plotlines,
 					labels: {
-						y : 50,
-                    	rotation: -45,
+						// y : 50,
+                    	// rotation: -45,
 	                    style: {
 	                        fontSize: '10px',
 	                        // fontFamily: 'Verdana, sans-serif'
@@ -465,9 +483,9 @@ Ext.define('CustomApp', {
 
 	config: {
 		defaultSettings : {
-			startRelease : "Release 1",
+			startRelease : "Release 5",
 			endRelease : "Release 7",
-			hardeningSprints : 0,
+			hardeningSprints : 1,
 			epicStoryId : "US14919"
 			// ignoreZeroValues        : true,
 			// PreliminaryEstimate     : true,
