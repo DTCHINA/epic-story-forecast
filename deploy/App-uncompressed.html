@@ -14,10 +14,17 @@ Ext.define('CustomApp', {
     extend: 'Rally.app.App',
     componentCls: 'app',
     items:{ html:'<a href="https://help.rallydev.com/apps/2.0rc2/doc/">App SDK 2.0rc2 Docs</a>'},
+
+    seriesIterationPlanned : 0,
+    seriesIterationAccepted : 1,
+    seriesRemaining : 2,
+    seriesPlanned : 3,
+    seriesProjected : 4,
+    seriesIdeal : 5,
+
     launch: function() {
     	app = this;
         //Write app code here
-        console.log("launched!");
         app.queryReleases();
     },
 
@@ -25,6 +32,7 @@ Ext.define('CustomApp', {
 
     	var startReleaseName = app.getSetting("startRelease");
     	var endReleaseName   = app.getSetting("endRelease");
+    	var epicStoryId = app.getSetting("epicStoryId");
 
     	var configs = [];
 		configs.push({ 	
@@ -37,22 +45,26 @@ Ext.define('CustomApp', {
 			fetch : true,
 			filters : [ { property:"Name", operator:"=", value:endReleaseName} ]
     	});
+		configs.push({ 	
+			model : "HierarchicalRequirement",
+			fetch : ["ObjectID","FormattedID","Name","PlanEstimate"],
+			filters : [ { property:"FormattedID", operator:"=", value: epicStoryId} ]
+    	});
+
 
     	async.map( configs, app.wsapiQuery, function(err,results) {
 
-    		console.log ("Results",results);
 
     		if (results[0].length === 0 || results[1].length === 0) {
     			app.add({html:"Unable to find start or end release"});  			
+    		} else if (results[2].length===0) {
+    			app.add({html:"Unable to find story id:" + epicStoryId});  			
     		} else {
-
+    			app.epicStory = results[2][0];
 	    		// do something with the two results
-	    		console.log("first release",results[0]);
-	    		console.log("second release",results[1]);
 	    		var r1 = results[0][0].raw.ReleaseStartDate;
 	    		var r2 = results[1][0].raw.ReleaseDate;
 	    		app.releaseExtent = { start : r1, end : r2};
-	    		console.log(r1,r2);
 
 	    		var configs = [];
 	    		configs.push({ 	
@@ -65,7 +77,6 @@ Ext.define('CustomApp', {
 	    		});
 
 	    		async.map( configs, app.wsapiQuery, function(err,results) {
-	    			console.log("all releases",results[0].length,results[0]);
 	    			app.releases = results[0];
 	    			app.queryIterations();
 	    		});
@@ -86,11 +97,33 @@ Ext.define('CustomApp', {
     	});
     	async.map( configs, app.wsapiQuery, function(err,results) {
 
-    		console.log("iterations",results[0]);
     		app.iterations = results[0];
-    		app.createChartSeries();
+    		app.queryChildSnapshots();
 
     	});
+
+    },
+
+    queryChildSnapshots : function() {
+
+    	var epicObjectID = app.epicStory.get("ObjectID");
+
+    	var storeConfig = {
+            find : {
+                '_TypeHierarchy' : { "$in" : ["HierarchicalRequirement"] },
+                '_ItemHierarchy' : { "$in" : [epicObjectID] },
+                '__At' : 'current',
+                'Children' : null
+            },
+            fetch: ['_ItemHierarchy','_UnformattedID','ObjectID','ScheduleState','PlanEstimate','Iteration','Name'],
+            hydrate: ['ScheduleState']
+        };
+
+        async.map( [storeConfig], app.snapshotQuery,function(err,results){
+        	// console.log("snapshot names:",_.map(results[0],function(s){return s.get("Name");}));
+        	app.ChildSnapshots = results[0];
+        	app.createChartSeries();
+        });
 
     },
 
@@ -104,45 +137,120 @@ Ext.define('CustomApp', {
     },
 
     lastReleaseIteration : function(release) {
-    	console.log("last release",release);
     	var iterations = _.filter(app.conIterations, function (i) {
     		var id = Rally.util.DateTime.fromIsoString(i.raw.EndDate);
     		var rsd = Rally.util.DateTime.fromIsoString(release.raw.ReleaseStartDate);
     		var red = Rally.util.DateTime.fromIsoString(release.raw.ReleaseDate);
     		return (( id >= rsd) && (id <= red));
     	});
-    	console.log("last release iterations",iterations);
     	iterations = _.sortBy(iterations,function(i) { return i.get("EndDate");});
     	return _.last(iterations);
+    },
+
+    validValue : function(value) {
+    	return !_.isUndefined(value) && !_.isNull(value) && value !== '';
+    },
+
+    iterationSnapshots : function(conIteration) {
+
+		var iterations = _.filter(app.iterations, function(ai) {
+			return ai.get("Name") === conIteration.get("Name");
+		});
+
+		var iterationIds = _.map(iterations,function(i) {
+			return i.get("ObjectID");
+		});
+
+		var iterationSnapShots = _.filter(app.ChildSnapshots, function(s) {
+			return _.indexOf(iterationIds,s.get("Iteration")) !== -1;
+		});
+
+		return iterationSnapShots;
+    },
+
+    currentIterationIdx : function() {
+    	var today = new Date();
+		var currentIterationIdx = _.findIndex( app.conIterations, function(i) {
+    		return (today >= Rally.util.DateTime.fromIsoString(i.raw.StartDate)) &&
+    			(today <= Rally.util.DateTime.fromIsoString(i.raw.EndDate))
+    	});
+    	return currentIterationIdx;
     },
 
     createChartSeries : function() {
     	var series = [];
 
     	app.conIterations = app.consolidateTimeboxByName(app.iterations);
-    	console.log("con it",_.map(app.conIterations,function(c){return c.get("Name");}));
+		var currentIdx = app.currentIterationIdx();
+    	var undefinedPoints = _.reduce( app.ChildSnapshots,function(sum,s){
+    		return sum + ( !app.validValue(s.get("Iteration")) ? s.get("PlanEstimate") : 0)
+    	},0);
 
+    	var allAccepted = _.reduce( app.ChildSnapshots,function(sum,s){
+    		return sum + (s.get("ScheduleState")==="Accepted" ? s.get("PlanEstimate") : 0);
+    	},0);
+
+		// labels (iteration names)
     	series.push( {
     		data : _.map( app.conIterations, function(i) {
     			return i.get("Name");
 			})
     	});
 
+    	// iteration planned 
     	series.push( {
-    		name : 'random values',
-    		type : 'area',
+    		name : 'planned',
+    		// type : 'area',
     		data : _.map( app.conIterations, function(i) {
-    			return Math.floor((Math.random() * 100) + 1);;
+    			
+    			var planned = _.reduce( app.iterationSnapshots(i), function(sum,s) {
+    				return sum + s.get("PlanEstimate");
+    			},0);
+
+    			return planned;
 			})
     	});
 
+    	// iteration accepted
+    	series.push( {
+    		name : 'accepted',
+    		// type : 'area',
+    		data : _.map( app.conIterations, function(i) {
+    			
+    			var accepted = _.reduce( app.iterationSnapshots(i), function(sum,s) {
+    				// console.log("accepted?",s.get("ScheduleState")==="Accepted",s.get("PlanEstimate"),s);
+    				return sum + (s.get("ScheduleState")==="Accepted" ? s.get("PlanEstimate") : 0);
+    			},0);
+    			return accepted;
+			})
+    	});
+
+    	var previouslyAccepted = allAccepted - ( 
+    		_.reduce(series[app.seriesIterationAccepted].data,function(sum,v) { return sum + v; } ,0)
+    	);
+
+    	// remaining
+    	series.push( {
+    		name : 'remaining',
+    		data : _.map( app.conIterations, function(i,x) {
+
+    			if ( currentIdx!==-1 && x >= currentIdx) {
+    				return null;
+    			} else {
+    				return app.epicStory.get("PlanEstimate") -
+	    				previouslyAccepted -
+	    				_.reduce( series[app.seriesIterationAccepted].data.slice(0,x), function(sum,v) { 
+	    					return sum + v;
+	    				},0);
+	    		}
+    		})
+    	});
     	app.showChart(series);
 
     },
 
 	showChart : function(series) {
 
-        console.log("series",series);
         var that = this;
         var chart = this.down("#chart1");
         if (chart !== null)
@@ -207,8 +315,11 @@ Ext.define('CustomApp', {
 
     createPlotLines : function(seriesData) {
 
+    	var plotLines = [];
+
         // filter the iterations
-        var itPlotLines = _.map(seriesData[0].data, function(i,x){
+        var iterationPlotLines = 
+        	_.map(seriesData[0].data, function(i,x){
             return {
                 // label : { text : i} ,
                 dashStyle : "Dot",
@@ -218,16 +329,16 @@ Ext.define('CustomApp', {
                 value : x
             }; 
         });
+
         // create release plot lines        
         app.conReleases = app.consolidateTimeboxByName(app.releases);
 
-        var rePlotLines = _.map(app.conReleases,function(r) {
+        var releasePlotLines = _.map(app.conReleases,function(r) {
         	var iteration = app.lastReleaseIteration(r);
         	if (_.isUndefined(iteration)||_.isNull(iteration)) {
         		return {};
         	} else {
         		var index = _.indexOf( seriesData[0].data, iteration.get("Name"));
-        		console.log("iteration index",iteration,index);
 	        	return {
 		                // dashStyle : "Dot",
 					label : { text : r.get("Name")} ,
@@ -237,7 +348,20 @@ Ext.define('CustomApp', {
 	            }; 
 	        }
         });
-        return itPlotLines.concat(rePlotLines);
+
+    	var idx = app.currentIterationIdx();
+    	if (idx!==-1) {
+    		plotLines.push({
+    				dashStyle : "Dot",
+					label : { text : "Current"} ,
+	                color: 'blue',
+	                width: 2,
+	                value: idx
+			});
+			    		
+    	}
+
+        return plotLines.concat(iterationPlotLines).concat(releasePlotLines);
 
     },
 
@@ -246,7 +370,7 @@ Ext.define('CustomApp', {
             startRelease : "Release 1",
             endRelease : "Release 7",
             hardeningSprints : 0,
-            epicStoryId : ""
+            epicStoryId : "US14919"
             // ignoreZeroValues        : true,
             // PreliminaryEstimate     : true,
             // StoryPoints             : true,
@@ -309,14 +433,27 @@ Ext.define('CustomApp', {
             }
         });
 
+    },
+
+    snapshotQuery : function( config ,callback) {
+
+        var storeConfig = {
+            find    : config.find,
+            fetch   : config.fetch,
+            hydrate : config.hydrate,
+            autoLoad : true,
+            pageSize : 10000,
+            limit    : 'Infinity',
+            listeners : {
+                scope : this,
+                load  : function(store,snapshots,success) {
+                    callback(null,snapshots);
+                }
+            }
+        };
+        var snapshotStore = Ext.create('Rally.data.lookback.SnapshotStore', storeConfig);
+
     }
-
-
-
-
-
-
-
 
 });
 
