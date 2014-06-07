@@ -190,7 +190,7 @@ Ext.define('CustomApp', {
     	// iteration planned 
     	series.push( {
     		name : 'planned',
-    		// type : 'area',
+    		type : 'column',
     		data : _.map( app.conIterations, function(i) {
     			
     			var planned = _.reduce( app.iterationSnapshots(i), function(sum,s) {
@@ -204,7 +204,7 @@ Ext.define('CustomApp', {
     	// iteration accepted
     	series.push( {
     		name : 'accepted',
-    		// type : 'area',
+    		type : 'column',
     		data : _.map( app.conIterations, function(i) {
     			
     			var accepted = _.reduce( app.iterationSnapshots(i), function(sum,s) {
