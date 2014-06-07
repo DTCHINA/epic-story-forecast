@@ -119,8 +119,10 @@ Ext.define('CustomApp', {
     	});
 
     	series.push( {
+    		name : 'random values',
+    		type : 'area',
     		data : _.map( app.conIterations, function(i) {
-    			return 10;
+    			return Math.floor((Math.random() * 100) + 1);;
 			})
     	});
 
@@ -152,7 +154,8 @@ Ext.define('CustomApp', {
                 series : series.slice(1, series.length)
             },
 
-           chartColors: ['Gray', 'Orange', 'LightGray', 'LightGray', 'LightGray', 'Blue','Green'],
+           //chartColors: ['Gray', 'Orange', 'LightGray', 'LightGray', 'LightGray', 'Blue','Green'],
+           chartColors: ['#e0f3db', '#a8ddb5', '#43a2ca'],
             // chartColors : createColorsArray(series),
 
             chartConfig : {
@@ -175,13 +178,14 @@ Ext.define('CustomApp', {
                 },
                 yAxis: {
                     title: {
-                        // text: that.pointsUnitType() ? 'Points':'Count'
+                        text: 'Points'
                     },
-                    plotLines: [{
-                        value: 0,
-                        width: 1,
-                        color: '#808080'
-                    }]
+                    // plotLines: [{
+                    // 	dashStyle : "Dot",
+                    //     // value: 0,
+                    //     width: 1,
+                    //     color: '#808080'
+                    // }]
                 },
                 tooltip: {
                 },
@@ -196,7 +200,7 @@ Ext.define('CustomApp', {
         // filter the iterations
         var itPlotLines = _.map(seriesData[0].data, function(i,x){
             return {
-                // label : i.get("Name"),
+                // label : { text : i} ,
                 dashStyle : "Dot",
                 color: 'grey',
                 width: 1,
@@ -216,6 +220,7 @@ Ext.define('CustomApp', {
         		console.log("iteration index",iteration,index);
 	        	return {
 		                // dashStyle : "Dot",
+					label : { text : r.get("Name")} ,
 	                color: 'grey',
 	                width: 1,
 	                value: index
@@ -276,7 +281,6 @@ Ext.define('CustomApp', {
 
         return values;
     },
-
 
     // generic function to perform a web services query    
     wsapiQuery : function( config , callback ) {
