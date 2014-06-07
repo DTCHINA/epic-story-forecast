@@ -9,8 +9,9 @@ Ext.define('CustomApp', {
 	seriesIterationAccepted : 2,
 	seriesRemaining : 3,
 	seriesPlanned : 4,
-	seriesProjected : 5,
-	seriesIdeal : 6,
+	seriesRegressionAccepted : 5,
+	seriesRegressionPlanned : 6,
+	seriesIdeal : 7,
 
 	launch: function() {
 		app = this;
@@ -259,8 +260,7 @@ Ext.define('CustomApp', {
 				}
 			})
 		});
-
-		console.log("currentIdx",currentIdx);
+		
 		// planned
 		series.push( {
 			name : 'Planned',
@@ -284,7 +284,7 @@ Ext.define('CustomApp', {
 
 		series.push( {
 			name : 'Regression(Accepted)',
-			dashStyle: 'dash',
+			dashStyle: 'Dot',
 			data : function(){
 				// var a = _.compact(series[app.seriesIterationAccepted].data);
 				var a = _.map(series[app.seriesIterationAccepted].data,function(v,x){
@@ -309,7 +309,7 @@ Ext.define('CustomApp', {
 
 		series.push( {
 			name : 'Regression(Planned)',
-			dashStyle: 'dash',
+			dashStyle: 'Dot',
 			data : function(){
 				var a = _.map(series[app.seriesIterationAccepted].data,function(v,x){
 					if (x < currentIdx) {
@@ -341,7 +341,7 @@ Ext.define('CustomApp', {
 		// ideal
 		series.push( {
 			name : 'Ideal',
-			dashStyle: 'dash',
+			// dashStyle: 'dot',
 			data : function() {
 				var startValue = app.epicStory.get("PlanEstimate") - previouslyAccepted;
 				var stepValue = startValue / ( app.conIterations.length - (parseInt(app.getSetting("hardeningSprints"))+1));
@@ -382,7 +382,15 @@ Ext.define('CustomApp', {
 			},
 
 		   //chartColors: ['Gray', 'Orange', 'LightGray', 'LightGray', 'LightGray', 'Blue','Green'],
-		   chartColors: ['#e0f3db', '#a8ddb5', '#43a2ca'],
+		 	// seriesIterationPlanned : 1,
+			// seriesIterationAccepted : 2,
+			// seriesRemaining : 3,
+			// seriesPlanned : 4,
+			// seriesProjected : 5,
+			// seriesIdeal : 6,
+
+			// blue, green, lt green,
+		   chartColors: ['#99d8c9', '#2ca25f', '#2b8cbe','#a6bddb', '#a8ddb5', '#d0d1e6', '#bdbdbd' ],
 			// chartColors : createColorsArray(series),
 
 			chartConfig : {
@@ -483,10 +491,10 @@ Ext.define('CustomApp', {
 
 	config: {
 		defaultSettings : {
-			startRelease : "Release 5",
-			endRelease : "Release 7",
-			hardeningSprints : 1,
-			epicStoryId : "US14919"
+			startRelease : "",
+			endRelease : "",
+			hardeningSprints : "1",
+			epicStoryId : ""
 			// ignoreZeroValues        : true,
 			// PreliminaryEstimate     : true,
 			// StoryPoints             : true,
@@ -514,17 +522,17 @@ Ext.define('CustomApp', {
 			{
 				name: 'startRelease',
 				xtype: 'rallytextfield',
-				label : "First Relase in Chart Range"
+				label : "First Release Name in Chart Range"
 			},
 			{
 				name: 'endRelease',
 				xtype: 'rallytextfield',
-				label : "Last Relase in Chart Range"
+				label : "Last Release Name in Chart Range"
 			},
 			{
 				name: 'hardeningSprints',
 				xtype: 'rallytextfield',
-				label : "Last Relase in Chart Range"
+				label : "Number of Hardening Sprints"
 			},
 
 		];
