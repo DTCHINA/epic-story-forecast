@@ -117,12 +117,25 @@ Ext.define('CustomApp', {
 
 	},
 
+	timeboxName : function(timebox) {
+		var d = Rally.util.DateTime.fromIsoString( 
+			timebox.get("_type") === 'iteration' ?
+				timebox.raw.EndDate : 
+				timebox.raw.ReleaseDate
+		);
+		var name = timebox.get("Name") + " (" + (d.getMonth()+1) + "/" + d.getDate() + ")";
+		return name;
+	},
+
 	consolidateTimeboxByName : function(timeboxes) {
 		var groups = _.groupBy(timeboxes,function(i) {
-			return i.get("Name");
+			// return i.get("Name");
+			return app.timeboxName(i)
 		});
+		console.log("groups",groups);
 		var values = _.values(groups);
 		var consolidated = _.map(values,function(v) { return v[0];});
+		console.log("consolidated",consolidated);
 		return consolidated;
 	},
 
@@ -144,7 +157,8 @@ Ext.define('CustomApp', {
 	iterationSnapshots : function(conIteration) {
 
 		var iterations = _.filter(app.iterations, function(ai) {
-			return ai.get("Name") === conIteration.get("Name");
+			// return ai.get("Name") === conIteration.get("Name");
+			return app.timeboxName(ai) === app.timeboxName(conIteration);
 		});
 
 		var iterationIds = _.map(iterations,function(i) {
@@ -171,6 +185,10 @@ Ext.define('CustomApp', {
 		var series = [];
 
 		app.conIterations = app.consolidateTimeboxByName(app.iterations);
+		app.conIterations = _.sortBy(app.conIterations,function(i) {
+			return Rally.util.DateTime.fromIsoString(i.raw.EndDate)
+		});
+
 		var currentIdx = app.currentIterationIdx();
 		var undefinedPoints = _.reduce( app.ChildSnapshots,function(sum,s){
 			return sum + ( !app.validValue(s.get("Iteration")) ? s.get("PlanEstimate") : 0)
@@ -183,7 +201,8 @@ Ext.define('CustomApp', {
 		// labels (iteration names)
 		series.push( {
 			data : _.map( app.conIterations, function(i) {
-				return i.get("Name");
+				// return i.get("Name");
+				return app.timeboxName(i);
 			})
 		});
 
@@ -277,18 +296,16 @@ Ext.define('CustomApp', {
 						return null;
 					} else {
 						var projected = _.map( result.points.slice(lastPlannedIdx,x), function(p) { return p[1];});
-						console.log("x,Projected,rem",x,projected,series[app.seriesPlanned].data[lastPlannedIdx]);
-
-						return series[app.seriesPlanned].data[lastPlannedIdx] - 
+						var val = series[app.seriesPlanned].data[lastPlannedIdx] - 
 							_.reduce(projected,function(sum,v) {
 								return sum + v;
 							},0);
+						return val > 0 ? val : 0;
 					}
 				});
 				return d;
 			}()
 		});
-
 
 		series.push( {
 			name : 'regression-planned',
@@ -308,12 +325,13 @@ Ext.define('CustomApp', {
 						return null;
 					} else {
 						var projected = _.map( result.points.slice(lastPlannedIdx,x), function(p) { return p[1];});
-						console.log("x,Projected,rem",x,projected,series[app.seriesPlanned].data[lastPlannedIdx]);
+						// console.log("x,Projected,rem",x,projected,series[app.seriesPlanned].data[lastPlannedIdx]);
 
-						return series[app.seriesPlanned].data[lastPlannedIdx] - 
+						var val = series[app.seriesPlanned].data[lastPlannedIdx] - 
 							_.reduce(projected,function(sum,v) {
 								return sum + v;
 							},0);
+						return val > 0 ? val : 0;
 					}
 				});
 				return d;
@@ -338,8 +356,6 @@ Ext.define('CustomApp', {
 		// set the tick interval
 		var tickInterval = series[1].data.length <= (7*20) ? 7 : (series[1].data.length / 20);
 
-		// series[1].data = _.map(series[1].data, function(d) { return _.isNull(d) ? 0 : d; });
-
 		var extChart = Ext.create('Rally.ui.chart.Chart', {
 			columnWidth : 1,
 			itemId : "chart1",
@@ -356,19 +372,26 @@ Ext.define('CustomApp', {
 				chart: {
 				},
 				title: {
-				text: '',
+				text: app.epicStory.get("FormattedID")+ " : " + app.epicStory.get("Name"),
 				x: -20 //center
 				},
 				plotOptions: {
 					series: {
 						marker: {
-							radius: 5
+							radius: 3
 						}
 					}
 				},
 				xAxis: {
 					plotLines : plotlines,
-					type: 'datetime',
+					labels: {
+						y : 50,
+                    	rotation: -45,
+	                    style: {
+	                        fontSize: '10px',
+	                        // fontFamily: 'Verdana, sans-serif'
+                    }
+                }
 				},
 				yAxis: {
 					title: {
@@ -408,10 +431,15 @@ Ext.define('CustomApp', {
 			if (_.isUndefined(iteration)||_.isNull(iteration)) {
 				return {};
 			} else {
-				var index = _.indexOf( seriesData[0].data, iteration.get("Name"));
+				var index = _.indexOf( seriesData[0].data, app.timeboxName(iteration)); // iteration.get("Name"));
 				return {
 						// dashStyle : "Dot",
-					label : { text : r.get("Name")} ,
+					label : { 
+						text : app.timeboxName(r),
+	                    style: {
+	                        fontSize: '10px'
+	                    }
+					}, //  r.get("Name")} ,
 					color: 'grey',
 					width: 1,
 					value: index
