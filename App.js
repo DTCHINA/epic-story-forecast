@@ -4,6 +4,14 @@ Ext.define('CustomApp', {
     extend: 'Rally.app.App',
     componentCls: 'app',
     items:{ html:'<a href="https://help.rallydev.com/apps/2.0rc2/doc/">App SDK 2.0rc2 Docs</a>'},
+
+    seriesIterationPlanned : 0,
+    seriesIterationAccepted : 1,
+    seriesRemaining : 2,
+    seriesPlanned : 3,
+    seriesProjected : 4,
+    seriesIdeal : 5,
+
     launch: function() {
     	app = this;
         //Write app code here
@@ -59,7 +67,6 @@ Ext.define('CustomApp', {
 	    		});
 
 	    		async.map( configs, app.wsapiQuery, function(err,results) {
-	    			console.log("all releases",results[0].length,results[0]);
 	    			app.releases = results[0];
 	    			app.queryIterations();
 	    		});
@@ -80,7 +87,6 @@ Ext.define('CustomApp', {
     	});
     	async.map( configs, app.wsapiQuery, function(err,results) {
 
-    		console.log("iterations",results[0]);
     		app.iterations = results[0];
     		app.queryChildSnapshots();
 
@@ -104,8 +110,7 @@ Ext.define('CustomApp', {
         };
 
         async.map( [storeConfig], app.snapshotQuery,function(err,results){
-        	console.log("snapshots:",results[0]);
-        	console.log("snapshot names:",_.map(results[0],function(s){return s.get("Name");}));
+        	// console.log("snapshot names:",_.map(results[0],function(s){return s.get("Name");}));
         	app.ChildSnapshots = results[0];
         	app.createChartSeries();
         });
@@ -153,32 +158,36 @@ Ext.define('CustomApp', {
 		return iterationSnapShots;
     },
 
+    currentIterationIdx : function() {
+    	var today = new Date();
+		var currentIterationIdx = _.findIndex( app.conIterations, function(i) {
+    		return (today >= Rally.util.DateTime.fromIsoString(i.raw.StartDate)) &&
+    			(today <= Rally.util.DateTime.fromIsoString(i.raw.EndDate))
+    	});
+    	return currentIterationIdx;
+    },
+
     createChartSeries : function() {
     	var series = [];
 
     	app.conIterations = app.consolidateTimeboxByName(app.iterations);
+		var currentIdx = app.currentIterationIdx();
+    	var undefinedPoints = _.reduce( app.ChildSnapshots,function(sum,s){
+    		return sum + ( !app.validValue(s.get("Iteration")) ? s.get("PlanEstimate") : 0)
+    	},0);
 
+    	var allAccepted = _.reduce( app.ChildSnapshots,function(sum,s){
+    		return sum + (s.get("ScheduleState")==="Accepted" ? s.get("PlanEstimate") : 0);
+    	},0);
+
+		// labels (iteration names)
     	series.push( {
     		data : _.map( app.conIterations, function(i) {
     			return i.get("Name");
 			})
     	});
 
-    	series.push( {
-    		name : 'random values',
-    		// type : 'area',
-    		data : _.map( app.conIterations, function(i) {
-    			return Math.floor((Math.random() * 100) + 1);;
-			})
-    	});
-
-    	var undefinedPoints = _.reduce( app.ChildSnapshots,function(sum,s){
-    		console.log("s",s,!app.validValue(s.get("Iteration")));
-    		return sum + ( !app.validValue(s.get("Iteration")) ? s.get("PlanEstimate") : 0)
-    	},0);
-
-    	console.log("Undefined",undefinedPoints);
-
+    	// iteration planned 
     	series.push( {
     		name : 'planned',
     		// type : 'area',
@@ -187,12 +196,12 @@ Ext.define('CustomApp', {
     			var planned = _.reduce( app.iterationSnapshots(i), function(sum,s) {
     				return sum + s.get("PlanEstimate");
     			},0);
-    			console.log("Planned",planned);
 
     			return planned;
 			})
     	});
 
+    	// iteration accepted
     	series.push( {
     		name : 'accepted',
     		// type : 'area',
@@ -206,9 +215,26 @@ Ext.define('CustomApp', {
 			})
     	});
 
+    	var previouslyAccepted = allAccepted - ( 
+    		_.reduce(series[app.seriesIterationAccepted].data,function(sum,v) { return sum + v; } ,0)
+    	);
 
+    	// remaining
+    	series.push( {
+    		name : 'remaining',
+    		data : _.map( app.conIterations, function(i,x) {
 
-    	console.log("series",series);
+    			if ( currentIdx!==-1 && x >= currentIdx) {
+    				return null;
+    			} else {
+    				return app.epicStory.get("PlanEstimate") -
+	    				previouslyAccepted -
+	    				_.reduce( series[app.seriesIterationAccepted].data.slice(0,x), function(sum,v) { 
+	    					return sum + v;
+	    				},0);
+	    		}
+    		})
+    	});
     	app.showChart(series);
 
     },
@@ -279,8 +305,11 @@ Ext.define('CustomApp', {
 
     createPlotLines : function(seriesData) {
 
+    	var plotLines = [];
+
         // filter the iterations
-        var itPlotLines = _.map(seriesData[0].data, function(i,x){
+        var iterationPlotLines = 
+        	_.map(seriesData[0].data, function(i,x){
             return {
                 // label : { text : i} ,
                 dashStyle : "Dot",
@@ -290,10 +319,11 @@ Ext.define('CustomApp', {
                 value : x
             }; 
         });
+
         // create release plot lines        
         app.conReleases = app.consolidateTimeboxByName(app.releases);
 
-        var rePlotLines = _.map(app.conReleases,function(r) {
+        var releasePlotLines = _.map(app.conReleases,function(r) {
         	var iteration = app.lastReleaseIteration(r);
         	if (_.isUndefined(iteration)||_.isNull(iteration)) {
         		return {};
@@ -308,7 +338,20 @@ Ext.define('CustomApp', {
 	            }; 
 	        }
         });
-        return itPlotLines.concat(rePlotLines);
+
+    	var idx = app.currentIterationIdx();
+    	if (idx!==-1) {
+    		plotLines.push({
+    				dashStyle : "Dot",
+					label : { text : "Current"} ,
+	                color: 'blue',
+	                width: 2,
+	                value: idx
+			});
+			    		
+    	}
+
+        return plotLines.concat(iterationPlotLines).concat(releasePlotLines);
 
     },
 
