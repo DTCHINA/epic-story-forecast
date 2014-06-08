@@ -3,6 +3,10 @@ epic-story-forecast
 
 ## Overview
 
+![alt text](https://raw.githubusercontent.com/wrackzone/epic-story-forecast/master/doc/screenshot.png)
+
+
+
 
 ## License
 
