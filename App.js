@@ -15,11 +15,21 @@ Ext.define('CustomApp', {
 
 	launch: function() {
 		app = this;
-		//Write app code here
-		app.queryReleases();
+
+		async.waterfall([ 
+			app.queryReleases,
+			app.queryIterations,
+			app.queryChildSnapshots,
+			app.createChartSeries,
+			app.showChart
+		], 
+        function(err,results){
+        	console.log("err",err);
+        	console.log("results",results);
+        });
 	},
 
-	queryReleases : function() {
+	queryReleases : function(callback) {
 
 		var startReleaseName = app.getSetting("startRelease");
 		var endReleaseName   = app.getSetting("endRelease");
@@ -69,13 +79,14 @@ Ext.define('CustomApp', {
 
 				async.map( configs, app.wsapiQuery, function(err,results) {
 					app.releases = results[0];
-					app.queryIterations();
+					callback();
+					// app.queryIterations();
 				});
 			}
 		});
 	},
 
-	queryIterations : function() {
+	queryIterations : function(callback) {
 
 		var configs = [];
 		configs.push({ 	
@@ -86,16 +97,14 @@ Ext.define('CustomApp', {
 				{ property:"EndDate", operator:"<=", value : app.releaseExtent.end }
 			]
 		});
-		async.map( configs, app.wsapiQuery, function(err,results) {
-
+		async.map( configs, app.wsapiQuery, function(err,results) {	
 			app.iterations = results[0];
-			app.queryChildSnapshots();
-
+			callback();
+			// app.queryChildSnapshots();
 		});
-
 	},
 
-	queryChildSnapshots : function() {
+	queryChildSnapshots : function(callback) {
 
 		var epicObjectID = app.epicStory.get("ObjectID");
 
@@ -111,9 +120,8 @@ Ext.define('CustomApp', {
 		};
 
 		async.map( [storeConfig], app.snapshotQuery,function(err,results){
-			// console.log("snapshot names:",_.map(results[0],function(s){return s.get("Name");}));
 			app.ChildSnapshots = results[0];
-			app.createChartSeries();
+			callback();
 		});
 
 	},
@@ -133,10 +141,8 @@ Ext.define('CustomApp', {
 			// return i.get("Name");
 			return app.timeboxName(i)
 		});
-		console.log("groups",groups);
 		var values = _.values(groups);
 		var consolidated = _.map(values,function(v) { return v[0];});
-		console.log("consolidated",consolidated);
 		return consolidated;
 	},
 
@@ -158,7 +164,6 @@ Ext.define('CustomApp', {
 	iterationSnapshots : function(conIteration) {
 
 		var iterations = _.filter(app.iterations, function(ai) {
-			// return ai.get("Name") === conIteration.get("Name");
 			return app.timeboxName(ai) === app.timeboxName(conIteration);
 		});
 
@@ -194,7 +199,7 @@ Ext.define('CustomApp', {
 
 	},
 
-	createChartSeries : function() {
+	createChartSeries : function(callback) {
 		var series = [];
 
 		app.conIterations = app.consolidateTimeboxByName(app.iterations);
@@ -329,15 +334,12 @@ Ext.define('CustomApp', {
 						return [x, series[app.seriesIterationPlanned].data[x]];
 					}
 				});
-				// console.log(a);
 				var result = regression('linear', a);
 				var d = _.map(series[app.seriesIterationAccepted].data,function(v,x) {
 					if (x < lastPlannedIdx) {
 						return null;
 					} else {
 						var projected = _.map( result.points.slice(lastPlannedIdx,x), function(p) { return p[1];});
-						// console.log("x,Projected,rem",x,projected,series[app.seriesPlanned].data[lastPlannedIdx]);
-
 						var val = series[app.seriesPlanned].data[lastPlannedIdx] - 
 							_.reduce(projected,function(sum,v) {
 								return sum + v;
@@ -357,7 +359,6 @@ Ext.define('CustomApp', {
 			data : function() {
 				var startValue = app.epicStory.get("PlanEstimate") - previouslyAccepted;
 				var stepValue = startValue / ( app.conIterations.length - (parseInt(app.getSetting("hardeningSprints"))+1));
-				console.log(startValue,stepValue);
 				var arr = [];
 				for ( var x = 0 ; x < app.conIterations.length ; x++) {
 					var ideal = (startValue - (x * stepValue));
@@ -368,14 +369,14 @@ Ext.define('CustomApp', {
 			}()
 		});
 
-		app.showChart(series);
+		// app.showChart(series);
+		callback(null,series);
 
 	},
 
-	showChart : function(series) {
+	showChart : function(series,callback) {
 
-		var that = this;
-		var chart = this.down("#chart1");
+		var chart = app.down("#chart1");
 		if (chart !== null)
 			chart.removeAll();
 			
@@ -441,7 +442,8 @@ Ext.define('CustomApp', {
 				legend: { align: 'center', verticalAlign: 'bottom' }
 			}
 		});
-		this.add(extChart);
+		app.add(extChart);
+		callback(null,series);
 	},
 
 	createPlotLines : function(seriesData) {
