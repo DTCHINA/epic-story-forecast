@@ -13,9 +13,18 @@ __Planned__ The dotted line shows future progress based on stories planned into 
 
 __Regression__ There are two regression lines for the remaining unplanned work. The Accepted regression line is a projection based on acceptance rate todate. The Planned regression is a projection based on a combination of accepted and future planned work. 
 
+The __Ideal Line__ is a straightline burndown based on the total story points for this epic at the beginning of the timebox. It can be adjusted based on a specified number of hardening iterations.
 
 
 ![alt text](https://raw.githubusercontent.com/wrackzone/epic-story-forecast/master/doc/screenshot.png)
+
+In addition there are a number of other visual elements :-
+
+__Dotted vertical lines__ represent each iteration boundary. 
+
+__Solid vertical lines__ represent PSI Releases.
+
+The __Planned__ column represents planned story points for that iteration. The __Accepted__ column represents story points accepted in that iteration.
 
 
 
