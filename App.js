@@ -341,6 +341,7 @@ Ext.define('CustomApp', {
 		// ideal
 		series.push( {
 			name : 'Ideal',
+			zIndex : -1,
 			// dashStyle: 'dot',
 			data : function() {
 				var startValue = app.epicStory.get("PlanEstimate") - previouslyAccepted;
@@ -491,10 +492,10 @@ Ext.define('CustomApp', {
 
 	config: {
 		defaultSettings : {
-			startRelease : "",
-			endRelease : "",
+			startRelease : "Release 2",
+			endRelease : "Release 7",
 			hardeningSprints : "1",
-			epicStoryId : ""
+			epicStoryId : "US14919"
 			// ignoreZeroValues        : true,
 			// PreliminaryEstimate     : true,
 			// StoryPoints             : true,
