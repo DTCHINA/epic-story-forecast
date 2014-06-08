@@ -182,6 +182,18 @@ Ext.define('CustomApp', {
 		return currentIterationIdx;
 	},
 
+	nullifyTrailingZeroValues : function(arr) {
+
+		var idx = _.findLastIndex(arr,function(e) {
+			return e > 0;
+		});
+
+		return _.map(arr,function(e,x) {
+			return x < idx+1 ? e : null;
+		});
+
+	},
+
 	createChartSeries : function() {
 		var series = [];
 
@@ -225,7 +237,6 @@ Ext.define('CustomApp', {
 			_.findLastIndex(series[app.seriesIterationPlanned].data, function(v) {
 				return v > 0;
 			});
-		console.log("lpi",lastPlannedIdx);
 
 		// iteration accepted
 		series.push( {
@@ -303,7 +314,7 @@ Ext.define('CustomApp', {
 						return val > 0 ? val : 0;
 					}
 				});
-				return d;
+				return app.nullifyTrailingZeroValues(d);
 			}()
 		});
 
@@ -334,7 +345,7 @@ Ext.define('CustomApp', {
 						return val > 0 ? val : 0;
 					}
 				});
-				return d;
+				return app.nullifyTrailingZeroValues(d);
 			}()
 		});
 
@@ -474,6 +485,8 @@ Ext.define('CustomApp', {
 			}
 		});
 
+		plotLines = _.uniq(plotLines,function(p) { return p.value; });
+
 		var idx = app.currentIterationIdx();
 		if (idx!==-1) {
 			plotLines.push({
@@ -485,16 +498,15 @@ Ext.define('CustomApp', {
 			});
 						
 		}
-
 		return plotLines.concat(iterationPlotLines).concat(releasePlotLines);
-
 	},
 
 	config: {
 		defaultSettings : {
-			startRelease : "Release 2",
-			endRelease : "Release 7",
+			startRelease : "Release 1",
+			endRelease : "Release 9",
 			hardeningSprints : "1",
+			// epicStoryId : "US104028"
 			epicStoryId : "US14919"
 			// ignoreZeroValues        : true,
 			// PreliminaryEstimate     : true,
