@@ -3,7 +3,6 @@ var app = null;
 Ext.define('CustomApp', {
 	extend: 'Rally.app.App',
 	componentCls: 'app',
-	// items:{ html:'<a href="https://help.rallydev.com/apps/2.0rc2/doc/">App SDK 2.0rc2 Docs</a>'},
 
 	seriesIterationPlanned : 1,
 	seriesIterationAccepted : 2,
@@ -13,13 +12,46 @@ Ext.define('CustomApp', {
 	seriesRegressionPlanned : 6,
 	seriesIdeal : 7,
 
+	ui : function() {
+
+		app.chooser  = Ext.create('Rally.ui.dialog.ChooserDialog', {
+			artifactTypes: ['userstory'],
+			autoShow: false,
+			height: 250,
+			title: 'Choose User Stories',
+			listeners: {
+			artifactChosen: function(selectedRecord){
+			Ext.Msg.alert('Chooser', selectedRecord.get('Name') + ' was chosen');
+			},
+			scope: this
+			}
+		});
+
+		var button = Ext.create('Ext.Container', {
+			items: [{
+				xtype: 'rallybutton',
+				text: 'Select',
+				handler: function() {
+					app.chooser.show();
+					// Ext.Msg.alert('Button', 'You clicked me');
+				}
+			}]		
+		});
+
+		app.add(button);
+
+	},
+
 	launch: function() {
 		app = this;
+
+		app.ui();
 
 		async.waterfall([ 
 			app.queryReleases,
 			app.queryIterations,
 			app.queryChildSnapshots,
+			app.queryEpicSnapshots,
 			app.createChartSeries,
 			app.showChart
 		], 
@@ -52,9 +84,7 @@ Ext.define('CustomApp', {
 			filters : [ { property:"FormattedID", operator:"=", value: epicStoryId} ]
 		});
 
-
 		async.map( configs, app.wsapiQuery, function(err,results) {
-
 
 			if (results[0].length === 0 || results[1].length === 0) {
 				app.add({html:"Unable to find start or end release"});  			
@@ -80,7 +110,6 @@ Ext.define('CustomApp', {
 				async.map( configs, app.wsapiQuery, function(err,results) {
 					app.releases = results[0];
 					callback();
-					// app.queryIterations();
 				});
 			}
 		});
@@ -99,6 +128,10 @@ Ext.define('CustomApp', {
 		});
 		async.map( configs, app.wsapiQuery, function(err,results) {	
 			app.iterations = results[0];
+			app.conIterations = app.consolidateTimeboxByName(app.iterations);
+			app.conIterations = _.sortBy(app.conIterations,function(i) {
+				return Rally.util.DateTime.fromIsoString(i.raw.EndDate)
+			});
 			callback();
 			// app.queryChildSnapshots();
 		});
@@ -123,6 +156,75 @@ Ext.define('CustomApp', {
 			app.ChildSnapshots = results[0];
 			callback();
 		});
+
+	},
+
+	// includes history information.
+	queryEpicSnapshots : function(callback) {
+
+		var epicObjectID = app.epicStory.get("ObjectID");
+
+		var storeConfig = {
+			find : {
+				'ObjectID' : epicObjectID
+			},
+			fetch: ['_ItemHierarchy','_UnformattedID','ObjectID','ScheduleState','PlanEstimate'],
+			hydrate: ['ScheduleState']
+		};
+
+		async.map( [storeConfig], app.snapshotQuery,function(err,results){
+			var epicSnapshots = results[0];
+			// console.log("epicSnapshots",epicSnapshots);
+			// console.log("hc",app.lumenizeScope(epicSnapshots));
+			app.scopeSeries = app.lumenizeScope(epicSnapshots);
+			callback();
+		});
+
+	},
+
+	lumenizeScope : function(snapshots) {
+
+		console.log("this",this);
+
+        var lumenize = window.parent.Rally.data.lookback.Lumenize;
+        // var lumenize = Ext.create("Rally.data.lookback.Lumenize",{});
+
+		var calc = Ext.create("EpicSummaryCalculator",config);
+        // calculator config
+        var config = {
+            deriveFieldsOnInput: calc.getDerivedFieldsOnInput(),
+            metrics: calc.getMetrics(),
+            summaryMetricsConfig: [],
+            deriveFieldsAfterSummary: calc.getDerivedFieldsAfterSummary(),
+            granularity: 'day',
+            tz: 'America/Chicago',
+            holidays: [],
+            workDays: 'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday'
+        };
+
+        var t1 = new lumenize.Time(app.releaseExtent.start,'day',"America/New_York") //.getISOStringInTZ(config.tz);
+        var t2 = new lumenize.Time(app.releaseExtent.end,'day',"America/New_York") //.getISOStringInTZ(config.tz);
+        calculator = new lumenize.TimeSeriesCalculator(config);
+        // console.log(app.releaseExtent);
+        calculator.addSnapshots(_.map(snapshots,function(s){return s.data}), t1,t2);
+        
+        // create a high charts series config object, used to get the hc series data
+        var hcConfig = [ { name : "label" }, { name : "Scope"} ] ;
+        var hc = lumenize.arrayOfMaps_To_HighChartsSeries(calculator.getResults().seriesData, hcConfig);
+
+        // get the values just for iteration dates.
+        var series = [];
+        console.log("conIterations",app.conIterations);
+        _.each( app.conIterations, function(i) {
+        	console.log("i",i);
+        	var idx = _.findIndex( hc[0].data, function(d) {
+        		return moment(d).isSame( moment(i.raw.EndDate), "day");
+        	});
+        	series.push(hc[1].data[idx]);
+        });
+
+        console.log("series",series);
+        return series;
 
 	},
 
@@ -201,11 +303,6 @@ Ext.define('CustomApp', {
 
 	createChartSeries : function(callback) {
 		var series = [];
-
-		app.conIterations = app.consolidateTimeboxByName(app.iterations);
-		app.conIterations = _.sortBy(app.conIterations,function(i) {
-			return Rally.util.DateTime.fromIsoString(i.raw.EndDate)
-		});
 
 		var currentIdx = app.currentIterationIdx();
 		var undefinedPoints = _.reduce( app.ChildSnapshots,function(sum,s){
@@ -298,6 +395,7 @@ Ext.define('CustomApp', {
 			})
 		});
 
+		// regression(accepted)
 		series.push( {
 			name : 'Regression(Accepted)',
 			dashStyle: 'Dot',
@@ -369,6 +467,13 @@ Ext.define('CustomApp', {
 			}()
 		});
 
+		series.push( {
+			name : 'Scope',
+			zIndex : -2,
+			// dashStyle: 'dot',
+			data : app.scopeSeries
+		});
+
 		// app.showChart(series);
 		callback(null,series);
 
@@ -394,16 +499,8 @@ Ext.define('CustomApp', {
 				series : series.slice(1, series.length)
 			},
 
-		   //chartColors: ['Gray', 'Orange', 'LightGray', 'LightGray', 'LightGray', 'Blue','Green'],
-		 	// seriesIterationPlanned : 1,
-			// seriesIterationAccepted : 2,
-			// seriesRemaining : 3,
-			// seriesPlanned : 4,
-			// seriesProjected : 5,
-			// seriesIdeal : 6,
-
 			// blue, green, lt green,
-		   chartColors: ['#99d8c9', '#2ca25f', '#2b8cbe','#a6bddb', '#a8ddb5', '#d0d1e6', '#bdbdbd' ],
+		   	chartColors: ['#99d8c9', '#2ca25f', '#2b8cbe','#a6bddb', '#a8ddb5', '#d0d1e6', '#bdbdbd','#e0e0e0' ],
 			// chartColors : createColorsArray(series),
 
 			chartConfig : {
@@ -443,6 +540,12 @@ Ext.define('CustomApp', {
 			}
 		});
 		app.add(extChart);
+		var p = Ext.get(extChart.id);
+		elems = p.query("div.x-mask");
+		_.each(elems, function(e) { e.remove(); });
+		var elems = p.query("div.x-mask-msg");
+		_.each(elems, function(e) { e.remove(); });
+
 		callback(null,series);
 	},
 
@@ -508,20 +611,7 @@ Ext.define('CustomApp', {
 			startRelease : "Release 1",
 			endRelease : "Release 9",
 			hardeningSprints : "1",
-			// epicStoryId : "US104028"
 			epicStoryId : "US14919"
-			// ignoreZeroValues        : true,
-			// PreliminaryEstimate     : true,
-			// StoryPoints             : true,
-			// StoryCount              : false,
-			// StoryPointsProjection   : true,
-			// StoryCountProjection    : false,
-			// AcceptedStoryPoints     : true,
-			// AcceptedStoryCount      : false,
-			// AcceptedPointsProjection: true,
-			// AcceptedCountProjection : false,
-			// FeatureCount            : false,
-			// FeatureCountCompleted   : false
 		}
 	},
 

@@ -3,8 +3,9 @@
 <head>
     <title>epic-story-forecast</title>
 
-    <script type="text/javascript" src="/apps/2.0rc2/sdk.js"></script>
+    <script type="text/javascript" src="/apps/2.0rc3/sdk.js"></script>
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/async/1.22/async.min.js"></script>
+    <script type="text/javascript" src="https://rally1.rallydev.com/apps/2.0rc3/lib/analytics/analytics-all.js"></script>
 
     <script type="text/javascript">
         Rally.onReady(function () {
@@ -13,22 +14,65 @@
 Ext.define('CustomApp', {
 	extend: 'Rally.app.App',
 	componentCls: 'app',
-	// items:{ html:'<a href="https://help.rallydev.com/apps/2.0rc2/doc/">App SDK 2.0rc2 Docs</a>'},
 
 	seriesIterationPlanned : 1,
 	seriesIterationAccepted : 2,
 	seriesRemaining : 3,
 	seriesPlanned : 4,
-	seriesProjected : 5,
-	seriesIdeal : 6,
+	seriesRegressionAccepted : 5,
+	seriesRegressionPlanned : 6,
+	seriesIdeal : 7,
+
+	ui : function() {
+
+		app.chooser  = Ext.create('Rally.ui.dialog.ChooserDialog', {
+			artifactTypes: ['userstory'],
+			autoShow: false,
+			height: 250,
+			title: 'Choose User Stories',
+			listeners: {
+			artifactChosen: function(selectedRecord){
+			Ext.Msg.alert('Chooser', selectedRecord.get('Name') + ' was chosen');
+			},
+			scope: this
+			}
+		});
+
+		var button = Ext.create('Ext.Container', {
+			items: [{
+				xtype: 'rallybutton',
+				text: 'Select',
+				handler: function() {
+					app.chooser.show();
+					// Ext.Msg.alert('Button', 'You clicked me');
+				}
+			}]		
+		});
+
+		app.add(button);
+
+	},
 
 	launch: function() {
 		app = this;
-		//Write app code here
-		app.queryReleases();
+
+		app.ui();
+
+		async.waterfall([ 
+			app.queryReleases,
+			app.queryIterations,
+			app.queryChildSnapshots,
+			app.queryEpicSnapshots,
+			app.createChartSeries,
+			app.showChart
+		], 
+        function(err,results){
+        	console.log("err",err);
+        	console.log("results",results);
+        });
 	},
 
-	queryReleases : function() {
+	queryReleases : function(callback) {
 
 		var startReleaseName = app.getSetting("startRelease");
 		var endReleaseName   = app.getSetting("endRelease");
@@ -51,9 +95,7 @@ Ext.define('CustomApp', {
 			filters : [ { property:"FormattedID", operator:"=", value: epicStoryId} ]
 		});
 
-
 		async.map( configs, app.wsapiQuery, function(err,results) {
-
 
 			if (results[0].length === 0 || results[1].length === 0) {
 				app.add({html:"Unable to find start or end release"});  			
@@ -78,13 +120,13 @@ Ext.define('CustomApp', {
 
 				async.map( configs, app.wsapiQuery, function(err,results) {
 					app.releases = results[0];
-					app.queryIterations();
+					callback();
 				});
 			}
 		});
 	},
 
-	queryIterations : function() {
+	queryIterations : function(callback) {
 
 		var configs = [];
 		configs.push({ 	
@@ -95,16 +137,18 @@ Ext.define('CustomApp', {
 				{ property:"EndDate", operator:"<=", value : app.releaseExtent.end }
 			]
 		});
-		async.map( configs, app.wsapiQuery, function(err,results) {
-
+		async.map( configs, app.wsapiQuery, function(err,results) {	
 			app.iterations = results[0];
-			app.queryChildSnapshots();
-
+			app.conIterations = app.consolidateTimeboxByName(app.iterations);
+			app.conIterations = _.sortBy(app.conIterations,function(i) {
+				return Rally.util.DateTime.fromIsoString(i.raw.EndDate)
+			});
+			callback();
+			// app.queryChildSnapshots();
 		});
-
 	},
 
-	queryChildSnapshots : function() {
+	queryChildSnapshots : function(callback) {
 
 		var epicObjectID = app.epicStory.get("ObjectID");
 
@@ -120,10 +164,78 @@ Ext.define('CustomApp', {
 		};
 
 		async.map( [storeConfig], app.snapshotQuery,function(err,results){
-			// console.log("snapshot names:",_.map(results[0],function(s){return s.get("Name");}));
 			app.ChildSnapshots = results[0];
-			app.createChartSeries();
+			callback();
 		});
+
+	},
+
+	// includes history information.
+	queryEpicSnapshots : function(callback) {
+
+		var epicObjectID = app.epicStory.get("ObjectID");
+
+		var storeConfig = {
+			find : {
+				'ObjectID' : epicObjectID
+			},
+			fetch: ['_ItemHierarchy','_UnformattedID','ObjectID','ScheduleState','PlanEstimate'],
+			hydrate: ['ScheduleState']
+		};
+
+		async.map( [storeConfig], app.snapshotQuery,function(err,results){
+			var epicSnapshots = results[0];
+			// console.log("epicSnapshots",epicSnapshots);
+			// console.log("hc",app.lumenizeScope(epicSnapshots));
+			app.scopeSeries = app.lumenizeScope(epicSnapshots);
+			callback();
+		});
+
+	},
+
+	lumenizeScope : function(snapshots) {
+
+		console.log("this",this);
+
+        var lumenize = window.parent.Rally.data.lookback.Lumenize;
+        // var lumenize = Ext.create("Rally.data.lookback.Lumenize",{});
+
+		var calc = Ext.create("EpicSummaryCalculator",config);
+        // calculator config
+        var config = {
+            deriveFieldsOnInput: calc.getDerivedFieldsOnInput(),
+            metrics: calc.getMetrics(),
+            summaryMetricsConfig: [],
+            deriveFieldsAfterSummary: calc.getDerivedFieldsAfterSummary(),
+            granularity: 'day',
+            tz: 'America/Chicago',
+            holidays: [],
+            workDays: 'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday'
+        };
+
+        var t1 = new lumenize.Time(app.releaseExtent.start,'day',"America/New_York") //.getISOStringInTZ(config.tz);
+        var t2 = new lumenize.Time(app.releaseExtent.end,'day',"America/New_York") //.getISOStringInTZ(config.tz);
+        calculator = new lumenize.TimeSeriesCalculator(config);
+        // console.log(app.releaseExtent);
+        calculator.addSnapshots(_.map(snapshots,function(s){return s.data}), t1,t2);
+        
+        // create a high charts series config object, used to get the hc series data
+        var hcConfig = [ { name : "label" }, { name : "Scope"} ] ;
+        var hc = lumenize.arrayOfMaps_To_HighChartsSeries(calculator.getResults().seriesData, hcConfig);
+
+        // get the values just for iteration dates.
+        var series = [];
+        console.log("conIterations",app.conIterations);
+        _.each( app.conIterations, function(i) {
+        	console.log("i",i);
+        	var idx = _.findIndex( hc[0].data, function(d) {
+        		return moment(d).isSame( moment(i.raw.EndDate), "day");
+        	});
+        	series.push(hc[1].data[idx]);
+        });
+
+        console.log("series",series);
+        return series;
 
 	},
 
@@ -142,10 +254,8 @@ Ext.define('CustomApp', {
 			// return i.get("Name");
 			return app.timeboxName(i)
 		});
-		console.log("groups",groups);
 		var values = _.values(groups);
 		var consolidated = _.map(values,function(v) { return v[0];});
-		console.log("consolidated",consolidated);
 		return consolidated;
 	},
 
@@ -167,7 +277,6 @@ Ext.define('CustomApp', {
 	iterationSnapshots : function(conIteration) {
 
 		var iterations = _.filter(app.iterations, function(ai) {
-			// return ai.get("Name") === conIteration.get("Name");
 			return app.timeboxName(ai) === app.timeboxName(conIteration);
 		});
 
@@ -191,13 +300,20 @@ Ext.define('CustomApp', {
 		return currentIterationIdx;
 	},
 
-	createChartSeries : function() {
-		var series = [];
+	nullifyTrailingZeroValues : function(arr) {
 
-		app.conIterations = app.consolidateTimeboxByName(app.iterations);
-		app.conIterations = _.sortBy(app.conIterations,function(i) {
-			return Rally.util.DateTime.fromIsoString(i.raw.EndDate)
+		var idx = _.findLastIndex(arr,function(e) {
+			return e > 0;
 		});
+
+		return _.map(arr,function(e,x) {
+			return x < idx+1 ? e : null;
+		});
+
+	},
+
+	createChartSeries : function(callback) {
+		var series = [];
 
 		var currentIdx = app.currentIterationIdx();
 		var undefinedPoints = _.reduce( app.ChildSnapshots,function(sum,s){
@@ -234,7 +350,6 @@ Ext.define('CustomApp', {
 			_.findLastIndex(series[app.seriesIterationPlanned].data, function(v) {
 				return v > 0;
 			});
-		console.log("lpi",lastPlannedIdx);
 
 		// iteration accepted
 		series.push( {
@@ -269,8 +384,7 @@ Ext.define('CustomApp', {
 				}
 			})
 		});
-
-		console.log("currentIdx",currentIdx);
+		
 		// planned
 		series.push( {
 			name : 'Planned',
@@ -292,9 +406,10 @@ Ext.define('CustomApp', {
 			})
 		});
 
+		// regression(accepted)
 		series.push( {
 			name : 'Regression(Accepted)',
-			dashStyle: 'dash',
+			dashStyle: 'Dot',
 			data : function(){
 				// var a = _.compact(series[app.seriesIterationAccepted].data);
 				var a = _.map(series[app.seriesIterationAccepted].data,function(v,x){
@@ -313,13 +428,13 @@ Ext.define('CustomApp', {
 						return val > 0 ? val : 0;
 					}
 				});
-				return d;
+				return app.nullifyTrailingZeroValues(d);
 			}()
 		});
 
 		series.push( {
 			name : 'Regression(Planned)',
-			dashStyle: 'dash',
+			dashStyle: 'Dot',
 			data : function(){
 				var a = _.map(series[app.seriesIterationAccepted].data,function(v,x){
 					if (x < currentIdx) {
@@ -328,15 +443,12 @@ Ext.define('CustomApp', {
 						return [x, series[app.seriesIterationPlanned].data[x]];
 					}
 				});
-				// console.log(a);
 				var result = regression('linear', a);
 				var d = _.map(series[app.seriesIterationAccepted].data,function(v,x) {
 					if (x < lastPlannedIdx) {
 						return null;
 					} else {
 						var projected = _.map( result.points.slice(lastPlannedIdx,x), function(p) { return p[1];});
-						// console.log("x,Projected,rem",x,projected,series[app.seriesPlanned].data[lastPlannedIdx]);
-
 						var val = series[app.seriesPlanned].data[lastPlannedIdx] - 
 							_.reduce(projected,function(sum,v) {
 								return sum + v;
@@ -344,18 +456,18 @@ Ext.define('CustomApp', {
 						return val > 0 ? val : 0;
 					}
 				});
-				return d;
+				return app.nullifyTrailingZeroValues(d);
 			}()
 		});
 
 		// ideal
 		series.push( {
 			name : 'Ideal',
-			dashStyle: 'dash',
+			zIndex : -1,
+			// dashStyle: 'dot',
 			data : function() {
 				var startValue = app.epicStory.get("PlanEstimate") - previouslyAccepted;
 				var stepValue = startValue / ( app.conIterations.length - (parseInt(app.getSetting("hardeningSprints"))+1));
-				console.log(startValue,stepValue);
 				var arr = [];
 				for ( var x = 0 ; x < app.conIterations.length ; x++) {
 					var ideal = (startValue - (x * stepValue));
@@ -366,14 +478,21 @@ Ext.define('CustomApp', {
 			}()
 		});
 
-		app.showChart(series);
+		series.push( {
+			name : 'Scope',
+			zIndex : -2,
+			// dashStyle: 'dot',
+			data : app.scopeSeries
+		});
+
+		// app.showChart(series);
+		callback(null,series);
 
 	},
 
-	showChart : function(series) {
+	showChart : function(series,callback) {
 
-		var that = this;
-		var chart = this.down("#chart1");
+		var chart = app.down("#chart1");
 		if (chart !== null)
 			chart.removeAll();
 			
@@ -391,8 +510,8 @@ Ext.define('CustomApp', {
 				series : series.slice(1, series.length)
 			},
 
-		   //chartColors: ['Gray', 'Orange', 'LightGray', 'LightGray', 'LightGray', 'Blue','Green'],
-		   chartColors: ['#e0f3db', '#a8ddb5', '#43a2ca'],
+			// blue, green, lt green,
+		   	chartColors: ['#99d8c9', '#2ca25f', '#2b8cbe','#a6bddb', '#a8ddb5', '#d0d1e6', '#bdbdbd','#e0e0e0' ],
 			// chartColors : createColorsArray(series),
 
 			chartConfig : {
@@ -431,7 +550,14 @@ Ext.define('CustomApp', {
 				legend: { align: 'center', verticalAlign: 'bottom' }
 			}
 		});
-		this.add(extChart);
+		app.add(extChart);
+		var p = Ext.get(extChart.id);
+		elems = p.query("div.x-mask");
+		_.each(elems, function(e) { e.remove(); });
+		var elems = p.query("div.x-mask-msg");
+		_.each(elems, function(e) { e.remove(); });
+
+		callback(null,series);
 	},
 
 	createPlotLines : function(seriesData) {
@@ -475,6 +601,8 @@ Ext.define('CustomApp', {
 			}
 		});
 
+		plotLines = _.uniq(plotLines,function(p) { return p.value; });
+
 		var idx = app.currentIterationIdx();
 		if (idx!==-1) {
 			plotLines.push({
@@ -486,29 +614,15 @@ Ext.define('CustomApp', {
 			});
 						
 		}
-
 		return plotLines.concat(iterationPlotLines).concat(releasePlotLines);
-
 	},
 
 	config: {
 		defaultSettings : {
-			startRelease : "Release 5",
-			endRelease : "Release 7",
-			hardeningSprints : 1,
+			startRelease : "Release 1",
+			endRelease : "Release 9",
+			hardeningSprints : "1",
 			epicStoryId : "US14919"
-			// ignoreZeroValues        : true,
-			// PreliminaryEstimate     : true,
-			// StoryPoints             : true,
-			// StoryCount              : false,
-			// StoryPointsProjection   : true,
-			// StoryCountProjection    : false,
-			// AcceptedStoryPoints     : true,
-			// AcceptedStoryCount      : false,
-			// AcceptedPointsProjection: true,
-			// AcceptedCountProjection : false,
-			// FeatureCount            : false,
-			// FeatureCountCompleted   : false
 		}
 	},
 
@@ -524,17 +638,17 @@ Ext.define('CustomApp', {
 			{
 				name: 'startRelease',
 				xtype: 'rallytextfield',
-				label : "First Relase in Chart Range"
+				label : "First Release Name in Chart Range"
 			},
 			{
 				name: 'endRelease',
 				xtype: 'rallytextfield',
-				label : "Last Relase in Chart Range"
+				label : "Last Release Name in Chart Range"
 			},
 			{
 				name: 'hardeningSprints',
 				xtype: 'rallytextfield',
-				label : "Last Relase in Chart Range"
+				label : "Number of Hardening Sprints"
 			},
 
 		];
@@ -600,6 +714,51 @@ Ext.define('CustomApp', {
 *
 **/
 !function(){"use strict";var a=function(a,b){var c=0,d=0,e=0,f=0,g=0,h=a.length-1,i=new Array(b);for(c=0;h>c;c++){for(f=c,d=c+1;h>d;d++)Math.abs(a[c][d])>Math.abs(a[c][f])&&(f=d);for(e=c;h+1>e;e++)g=a[e][c],a[e][c]=a[e][f],a[e][f]=g;for(d=c+1;h>d;d++)for(e=h;e>=c;e--)a[e][d]-=a[e][c]*a[c][d]/a[c][c]}for(d=h-1;d>=0;d--){for(g=0,e=d+1;h>e;e++)g+=a[e][d]*i[e];i[d]=(a[h][d]-g)/a[d][d]}return i},b={linear:function(a){for(var b=[0,0,0,0,0],c=0,d=[];c<a.length;c++)b[0]+=a[c][0],b[1]+=a[c][1],b[2]+=a[c][0]*a[c][0],b[3]+=a[c][0]*a[c][1],b[4]+=a[c][1]*a[c][1];for(var e=(c*b[3]-b[0]*b[1])/(c*b[2]-b[0]*b[0]),f=b[1]/c-e*b[0]/c,g=0,h=a.length;h>g;g++){var i=[a[g][0],a[g][0]*e+f];d.push(i)}var j="y = "+Math.round(100*e)/100+"x + "+Math.round(100*f)/100;return{equation:[e,f],points:d,string:j}},exponential:function(a){var b=[0,0,0,0,0,0],c=0,d=[];for(i=a.length;i>c;c++)b[0]+=a[c][0],b[1]+=a[c][1],b[2]+=a[c][0]*a[c][0]*a[c][1],b[3]+=a[c][1]*Math.log(a[c][1]),b[4]+=a[c][0]*a[c][1]*Math.log(a[c][1]),b[5]+=a[c][0]*a[c][1];for(var e=b[1]*b[2]-b[5]*b[5],f=Math.pow(Math.E,(b[2]*b[3]-b[5]*b[4])/e),g=(b[1]*b[4]-b[5]*b[3])/e,h=0,i=a.length;i>h;h++){var j=[a[h][0],f*Math.pow(Math.E,g*a[h][0])];d.push(j)}var k="y = "+Math.round(100*f)/100+"e^("+Math.round(100*g)/100+"x)";return{equation:[f,g],points:d,string:k}},logarithmic:function(a){var b=[0,0,0,0],c=0,d=[];for(h=a.length;h>c;c++)b[0]+=Math.log(a[c][0]),b[1]+=a[c][1]*Math.log(a[c][0]),b[2]+=a[c][1],b[3]+=Math.pow(Math.log(a[c][0]),2);for(var e=(c*b[1]-b[2]*b[0])/(c*b[3]-b[0]*b[0]),f=(b[2]-e*b[0])/c,g=0,h=a.length;h>g;g++){var i=[a[g][0],f+e*Math.log(a[g][0])];d.push(i)}var j="y = "+Math.round(100*f)/100+" + "+Math.round(100*e)/100+" ln(x)";return{equation:[f,e],points:d,string:j}},power:function(a){var b=[0,0,0,0],c=0,d=[];for(h=a.length;h>c;c++)b[0]+=Math.log(a[c][0]),b[1]+=Math.log(a[c][1])*Math.log(a[c][0]),b[2]+=Math.log(a[c][1]),b[3]+=Math.pow(Math.log(a[c][0]),2);for(var e=(c*b[1]-b[2]*b[0])/(c*b[3]-b[0]*b[0]),f=Math.pow(Math.E,(b[2]-e*b[0])/c),g=0,h=a.length;h>g;g++){var i=[a[g][0],f*Math.pow(a[g][0],e)];d.push(i)}var j="y = "+Math.round(100*f)/100+"x^"+Math.round(100*e)/100;return{equation:[f,e],points:d,string:j}},polynomial:function(b,c){"undefined"==typeof c&&(c=2);for(var d=[],e=[],f=[],g=0,h=0,i=0,j=c+1;j>i;i++){for(var k=0,l=b.length;l>k;k++)g+=Math.pow(b[k][0],i)*b[k][1];d.push(g),g=0;for(var m=[],n=0;j>n;n++){for(var k=0,l=b.length;l>k;k++)h+=Math.pow(b[k][0],i+n);m.push(h),h=0}e.push(m)}e.push(d);for(var o=a(e,j),i=0,l=b.length;l>i;i++){for(var p=0,q=0;q<o.length;q++)p+=o[q]*Math.pow(b[i][0],q);f.push([b[i][0],p])}for(var r="y = ",i=o.length-1;i>=0;i--)r+=i>0?Math.round(100*o[i])/100+"x^"+(i+1)+" + ":Math.round(100*o[i])/100;return{equation:o,points:f,string:r}}},c=function(a,c,d){return"string"==typeof a?b[a](c,d):void 0};"undefined"!=typeof exports?module.exports=c:window.regression=c}();
+                Ext.define("EpicSummaryCalculator", function() {
+
+    var self;
+
+    return {
+
+        extend: "Rally.data.lookback.calculator.TimeSeriesCalculator",
+
+        config : {
+        },
+
+        constructor:function(config) {
+            self = this;
+            this.initConfig(config);
+            return this;
+        },
+
+        getMetrics: function () {
+
+
+            var metrics = [
+                {
+                    field : "PlanEstimate",
+                    as : "Scope",
+                    f : "sum"
+                }
+            ]
+
+            return metrics;
+        },
+
+        getDerivedFieldsOnInput : function () {
+            // XS 1, S 3, M 5, L 8, XL 13
+            return [];
+        },
+
+        getDerivedFieldsAfterSummary : function () {
+
+            return [];
+        }
+
+    };
+   
+});
+
 
             Rally.launchApp('CustomApp', {
                 name:"epic-story-forecast",
