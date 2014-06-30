@@ -14,26 +14,23 @@ Ext.define('CustomApp', {
 
 	ui : function() {
 
-		app.chooser  = Ext.create('Rally.ui.dialog.ChooserDialog', {
-			artifactTypes: ['userstory'],
-			autoShow: false,
-			height: 250,
-			title: 'Choose User Stories',
-			listeners: {
-			artifactChosen: function(selectedRecord){
-			Ext.Msg.alert('Chooser', selectedRecord.get('Name') + ' was chosen');
-			},
-			scope: this
-			}
-		});
-
 		var button = Ext.create('Ext.Container', {
 			items: [{
 				xtype: 'rallybutton',
 				text: 'Select',
 				handler: function() {
-					app.chooser.show();
-					// Ext.Msg.alert('Button', 'You clicked me');
+					var chooser  = Ext.create('Rally.ui.dialog.ChooserDialog', {
+						artifactTypes: ['userstory','portfolioitem'],
+						autoShow: true,
+						height: 250,
+						title: 'Choose User Stories',
+						listeners: {
+						artifactChosen: function(selectedRecord){
+							Ext.Msg.alert('Chooser', selectedRecord.get('Name') + ' was chosen');
+						},
+						scope: this
+						}
+					});
 				}
 			}]		
 		});
@@ -79,8 +76,8 @@ Ext.define('CustomApp', {
 			filters : [ { property:"Name", operator:"=", value:endReleaseName} ]
 		});
 		configs.push({ 	
-			model : "HierarchicalRequirement",
-			fetch : ["ObjectID","FormattedID","Name","PlanEstimate"],
+			model : app.getSetting("typeName") === "Story" ? "HierarchicalRequirement" : app.getSetting("typeName"), //"artifact",
+			fetch : ["ObjectID","FormattedID","Name","PlanEstimate","LeafStoryPlanEstimateTotal"],
 			filters : [ { property:"FormattedID", operator:"=", value: epicStoryId} ]
 		});
 
@@ -89,9 +86,10 @@ Ext.define('CustomApp', {
 			if (results[0].length === 0 || results[1].length === 0) {
 				app.add({html:"Unable to find start or end release"});  			
 			} else if (results[2].length===0) {
-				app.add({html:"Unable to find story id:" + epicStoryId});  			
+				app.add({html:"Unable to find Item id:" + epicStoryId});  			
 			} else {
 				app.epicStory = results[2][0];
+				console.log("Epic",app.epicStory);
 				// do something with the two results
 				var r1 = results[0][0].raw.ReleaseStartDate;
 				var r2 = results[1][0].raw.ReleaseDate;
@@ -154,6 +152,7 @@ Ext.define('CustomApp', {
 
 		async.map( [storeConfig], app.snapshotQuery,function(err,results){
 			app.ChildSnapshots = results[0];
+			console.log("child snapshots",app.ChildSnapshots.length);
 			callback();
 		});
 
@@ -168,15 +167,16 @@ Ext.define('CustomApp', {
 			find : {
 				'ObjectID' : epicObjectID
 			},
-			fetch: ['_ItemHierarchy','_UnformattedID','ObjectID','ScheduleState','PlanEstimate'],
+			fetch: ['_ItemHierarchy','_UnformattedID','ObjectID','ScheduleState','PlanEstimate','LeafStoryPlanEstimateTotal'],
 			hydrate: ['ScheduleState']
 		};
 
 		async.map( [storeConfig], app.snapshotQuery,function(err,results){
 			var epicSnapshots = results[0];
-			// console.log("epicSnapshots",epicSnapshots);
-			// console.log("hc",app.lumenizeScope(epicSnapshots));
+			console.log("epicSnapshots",epicSnapshots.length,epicSnapshots);
 			app.scopeSeries = app.lumenizeScope(epicSnapshots);
+			console.log("epicScopeSeries",app.scopeSeries);
+			
 			callback();
 		});
 
@@ -184,18 +184,21 @@ Ext.define('CustomApp', {
 
 	lumenizeScope : function(snapshots) {
 
-		console.log("this",this);
-
         var lumenize = window.parent.Rally.data.lookback.Lumenize;
-        // var lumenize = Ext.create("Rally.data.lookback.Lumenize",{});
 
 		var calc = Ext.create("EpicSummaryCalculator",config);
         // calculator config
         var config = {
-            deriveFieldsOnInput: calc.getDerivedFieldsOnInput(),
-            metrics: calc.getMetrics(),
+            deriveFieldsOnInput: [],
+            metrics: [
+                {
+                    field : app.getSetting("typeName")==="Story" ? 'PlanEstimate' : 'LeafStoryPlanEstimateTotal',
+                    as : "Scope",
+                    f : "sum"
+                }
+            ],
             summaryMetricsConfig: [],
-            deriveFieldsAfterSummary: calc.getDerivedFieldsAfterSummary(),
+            deriveFieldsAfterSummary: [],
             granularity: 'day',
             tz: 'America/Chicago',
             holidays: [],
@@ -214,16 +217,12 @@ Ext.define('CustomApp', {
 
         // get the values just for iteration dates.
         var series = [];
-        console.log("conIterations",app.conIterations);
         _.each( app.conIterations, function(i) {
-        	console.log("i",i);
         	var idx = _.findIndex( hc[0].data, function(d) {
         		return moment(d).isSame( moment(i.raw.EndDate), "day");
         	});
         	series.push(hc[1].data[idx]);
         });
-
-        console.log("series",series);
         return series;
 
 	},
@@ -301,17 +300,32 @@ Ext.define('CustomApp', {
 
 	},
 
+	getEpicEstimateTotal : function() {
+		// if story return PlanEstimate
+		if (app.epicStory.get("_Type")==="HierarchicalRequirement")
+			return app.epicStory.get("PlanEstimate")
+		else
+			return app.epicStory.get("LeafStoryPlanEstimateTotal")
+	},
+
 	createChartSeries : function(callback) {
 		var series = [];
 
 		var currentIdx = app.currentIterationIdx();
 		var undefinedPoints = _.reduce( app.ChildSnapshots,function(sum,s){
-			return sum + ( !app.validValue(s.get("Iteration")) ? s.get("PlanEstimate") : 0)
+			return sum + ( !app.validValue(s.get("Iteration")) ? s.get("PlanEstimate") : 0 )
+		},0);
+		var undefinedCount = _.reduce( app.ChildSnapshots,function(sum,s){
+			return sum + ( !app.validValue(s.get("Iteration")) ? 1 : 0 )
 		},0);
 
 		var allAccepted = _.reduce( app.ChildSnapshots,function(sum,s){
 			return sum + (s.get("ScheduleState")==="Accepted" ? s.get("PlanEstimate") : 0);
 		},0);
+		var allAcceptedCount = _.reduce( app.ChildSnapshots,function(sum,s){
+			return sum + (s.get("ScheduleState")==="Accepted" ? 1 : 0);
+		},0);
+
 
 		// labels (iteration names)
 		series.push( {
@@ -365,7 +379,7 @@ Ext.define('CustomApp', {
 				if ( currentIdx!==-1 && x >= currentIdx) {
 					return null;
 				} else {
-					return app.epicStory.get("PlanEstimate") -
+					return app.getEpicEstimateTotal() -
 						previouslyAccepted -
 						_.reduce( series[app.seriesIterationAccepted].data.slice(0,x), function(sum,v) { 
 							return sum + v;
@@ -383,7 +397,7 @@ Ext.define('CustomApp', {
 				if ( currentIdx!==-1 && (x < currentIdx-1 || x > lastPlannedIdx)) {
 					return null;
 				} else {
-					return app.epicStory.get("PlanEstimate") -
+					return app.getEpicEstimateTotal() -
 						previouslyAccepted -
 						_.reduce( series[app.seriesIterationAccepted].data.slice(0,x), function(sum,v) { 
 							return sum + v;
@@ -467,14 +481,13 @@ Ext.define('CustomApp', {
 			}()
 		});
 
+		// scope
 		series.push( {
 			name : 'Scope',
 			zIndex : -2,
-			// dashStyle: 'dot',
 			data : app.scopeSeries
 		});
 
-		// app.showChart(series);
 		callback(null,series);
 
 	},
@@ -607,17 +620,39 @@ Ext.define('CustomApp', {
 	},
 
 	config: {
+		// defaultSettings : {
+		// 	typeName : "Story",
+		// 	startRelease : "Release 1",
+		// 	endRelease : "Release 9",
+		// 	hardeningSprints : "1",
+		// 	epicStoryId : "US14919"
+		// }
+		// defaultSettings : {
+		// 	typeName : "PortfolioItem/Goal",
+		// 	startRelease : "Release 1",
+		// 	endRelease : "Release 9",
+		// 	hardeningSprints : "1",
+		// 	epicStoryId : "G1076"
+		// }
 		defaultSettings : {
-			startRelease : "Release 1",
-			endRelease : "Release 9",
+			typeName : "PortfolioItem/Initiative",
+			startRelease : "ALM Q1 Feature Release",
+			endRelease : "2014 Q2",
 			hardeningSprints : "1",
-			epicStoryId : "US14919"
+			epicStoryId : "I3032"
 		}
+
 	},
 
 	getSettingsFields: function() {
 
 		var values = [
+			{
+				name: 'typeName',
+				xtype: 'rallytextfield',
+				label : 'Type of Epic eg. "Story" or "PortfolioItem/Feature" or "PortfolioItem/Initiative" etc.'
+			},
+
 			{
 				name: 'epicStoryId',
 				xtype: 'rallytextfield',
