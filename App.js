@@ -311,7 +311,7 @@ Ext.define('CustomApp', {
 	createChartSeries : function(callback) {
 		var series = [];
 
-		var currentIdx = app.currentIterationIdx();
+		var currentIdx = app.currentIterationIdx() +1;
 		var undefinedPoints = _.reduce( app.ChildSnapshots,function(sum,s){
 			return sum + ( !app.validValue(s.get("Iteration")) ? s.get("PlanEstimate") : 0 )
 		},0);
@@ -370,6 +370,9 @@ Ext.define('CustomApp', {
 		var previouslyAccepted = allAccepted - ( 
 			_.reduce(series[app.seriesIterationAccepted].data,function(sum,v) { return sum + v; } ,0)
 		);
+
+		console.log("previouslyAccepted",previouslyAccepted);
+		console.log("accepted series",series[app.seriesIterationAccepted]);
 
 		// remaining
 		series.push( {
@@ -636,10 +639,10 @@ Ext.define('CustomApp', {
 		// }
 		defaultSettings : {
 			typeName : "PortfolioItem/Initiative",
-			startRelease : "ALM Q1 Feature Release",
-			endRelease : "2014 Q2",
+			startRelease : "Release 7",
+			endRelease : "Release 9",
 			hardeningSprints : "1",
-			epicStoryId : "I3032"
+			epicStoryId : "I1099"
 		}
 
 	},
