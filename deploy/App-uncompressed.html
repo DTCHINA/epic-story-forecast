@@ -322,7 +322,7 @@ Ext.define('CustomApp', {
 	createChartSeries : function(callback) {
 		var series = [];
 
-		var currentIdx = app.currentIterationIdx();
+		var currentIdx = app.currentIterationIdx() +1;
 		var undefinedPoints = _.reduce( app.ChildSnapshots,function(sum,s){
 			return sum + ( !app.validValue(s.get("Iteration")) ? s.get("PlanEstimate") : 0 )
 		},0);
@@ -381,6 +381,9 @@ Ext.define('CustomApp', {
 		var previouslyAccepted = allAccepted - ( 
 			_.reduce(series[app.seriesIterationAccepted].data,function(sum,v) { return sum + v; } ,0)
 		);
+
+		console.log("previouslyAccepted",previouslyAccepted);
+		console.log("accepted series",series[app.seriesIterationAccepted]);
 
 		// remaining
 		series.push( {
