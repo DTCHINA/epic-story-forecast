@@ -54,7 +54,7 @@ Ext.define('CustomApp', {
 		], 
         function(err,results){
         	console.log("err",err);
-        	console.log("results",results);
+        	// console.log("results",results);
         });
 	},
 
@@ -152,7 +152,7 @@ Ext.define('CustomApp', {
 
 		async.map( [storeConfig], app.snapshotQuery,function(err,results){
 			app.ChildSnapshots = results[0];
-			console.log("child snapshots",app.ChildSnapshots.length);
+			// console.log("child snapshots",app.ChildSnapshots.length);
 			callback();
 		});
 
@@ -173,9 +173,9 @@ Ext.define('CustomApp', {
 
 		async.map( [storeConfig], app.snapshotQuery,function(err,results){
 			var epicSnapshots = results[0];
-			console.log("epicSnapshots",epicSnapshots.length,epicSnapshots);
+			// console.log("epicSnapshots",epicSnapshots.length,epicSnapshots);
 			app.scopeSeries = app.lumenizeScope(epicSnapshots);
-			console.log("epicScopeSeries",app.scopeSeries);
+			// console.log("epicScopeSeries",app.scopeSeries);
 			
 			callback();
 		});
@@ -285,7 +285,8 @@ Ext.define('CustomApp', {
 			return (today >= Rally.util.DateTime.fromIsoString(i.raw.StartDate)) &&
 				(today <= Rally.util.DateTime.fromIsoString(i.raw.EndDate))
 		});
-		return currentIterationIdx;
+
+		return currentIterationIdx !== -1 ? currentIterationIdx : app.conIterations.length;
 	},
 
 	nullifyTrailingZeroValues : function(arr) {
@@ -301,8 +302,7 @@ Ext.define('CustomApp', {
 	},
 
 	getEpicEstimateTotal : function() {
-		// if story return PlanEstimate
-		if (app.epicStory.get("_Type")==="HierarchicalRequirement")
+		if (app.epicStory.get("_type")==="hierarchicalrequirement")
 			return app.epicStory.get("PlanEstimate")
 		else
 			return app.epicStory.get("LeafStoryPlanEstimateTotal")
@@ -311,7 +311,9 @@ Ext.define('CustomApp', {
 	createChartSeries : function(callback) {
 		var series = [];
 
-		var currentIdx = app.currentIterationIdx() +1;
+		var currentIdx = app.currentIterationIdx() + 1;
+		console.log("currentIdx",currentIdx);
+
 		var undefinedPoints = _.reduce( app.ChildSnapshots,function(sum,s){
 			return sum + ( !app.validValue(s.get("Iteration")) ? s.get("PlanEstimate") : 0 )
 		},0);
@@ -327,7 +329,7 @@ Ext.define('CustomApp', {
 		},0);
 
 
-		// labels (iteration names)
+		// 0 labels (iteration names)
 		series.push( {
 			data : _.map( app.conIterations, function(i) {
 				// return i.get("Name");
@@ -335,7 +337,7 @@ Ext.define('CustomApp', {
 			})
 		});
 
-		// iteration planned 
+		// 1 iteration planned 
 		series.push( {
 			name : 'planned',
 			type : 'column',
@@ -354,7 +356,7 @@ Ext.define('CustomApp', {
 				return v > 0;
 			});
 
-		// iteration accepted
+		// 2 iteration accepted
 		series.push( {
 			name : 'Accepted',
 			type : 'column',
@@ -371,25 +373,24 @@ Ext.define('CustomApp', {
 			_.reduce(series[app.seriesIterationAccepted].data,function(sum,v) { return sum + v; } ,0)
 		);
 
-		console.log("previouslyAccepted",previouslyAccepted);
-		console.log("accepted series",series[app.seriesIterationAccepted]);
-
-		// remaining
-		series.push( {
+		// 3 remaining
+		var remaining = {
 			name : 'Remaining',
 			data : _.map( app.conIterations, function(i,x) {
 
 				if ( currentIdx!==-1 && x >= currentIdx) {
 					return null;
 				} else {
-					return app.getEpicEstimateTotal() -
-						previouslyAccepted -
-						_.reduce( series[app.seriesIterationAccepted].data.slice(0,x), function(sum,v) { 
-							return sum + v;
-						},0);
+					var remainingSoFar = app.getEpicEstimateTotal() - previouslyAccepted -
+							_.reduce( series[app.seriesIterationAccepted].data.slice(0,x), function(sum,v) { 
+								return sum + v;
+							},0);
+					return remainingSoFar;
 				}
 			})
-		});
+		};
+
+		series.push( remaining );
 		
 		// planned
 		series.push( {
@@ -496,14 +497,14 @@ Ext.define('CustomApp', {
 	},
 
 	showChart : function(series,callback) {
-
+		console.log("series",series);
 		var chart = app.down("#chart1");
 		if (chart !== null)
 			chart.removeAll();
-			
+		
 		// create plotlines
 		var plotlines = app.createPlotLines(series);
-		
+
 		// set the tick interval
 		var tickInterval = series[1].data.length <= (25) ? 1 : Math.ceil((series[1].data.length / 25));
 
@@ -606,23 +607,49 @@ Ext.define('CustomApp', {
 			}
 		});
 
-		plotLines = _.uniq(plotLines,function(p) { return p.value; });
+		plotLines = _.uniq(iterationPlotLines,function(p) { return p.value; });
+
+		plotLines = plotLines.concat(releasePlotLines);
+		// console.log(plotLines);
 
 		var idx = app.currentIterationIdx();
-		if (idx!==-1) {
-			plotLines.push({
+
+		// if the current iteration index exists then replace any existing plotfline (if any) or
+		// add to the list
+		if (idx!==-1) { 
+			var iterationPL = {
 					dashStyle : "Dot",
 					label : { text : "Current"} ,
 					color: 'blue',
 					width: 2,
 					value: idx
+			};
+			var y = -1;
+			_.each(plotLines,function(p,i) {
+				if ( p.value === idx) {
+					y = i;
+				}
 			});
-						
+			if (y===-1) {
+				plotLines.push(iterationPL)
+			} else {
+				plotLines[y] = iterationPL;
+			}
 		}
-		return plotLines.concat(iterationPlotLines).concat(releasePlotLines);
+		return plotLines;
+						
+		// return plotLines.concat(iterationPlotLines).concat(releasePlotLines);
 	},
 
 	config: {
+		defaultSettings : {
+			typeName : "Story",
+			startRelease : "Release 7",
+			endRelease : "Release 8",
+			hardeningSprints : "0",
+			epicStoryId : "US16124"
+		}
+
 		// defaultSettings : {
 		// 	typeName : "Story",
 		// 	startRelease : "Release 1",
@@ -637,13 +664,13 @@ Ext.define('CustomApp', {
 		// 	hardeningSprints : "1",
 		// 	epicStoryId : "G1076"
 		// }
-		defaultSettings : {
-			typeName : "PortfolioItem/Initiative",
-			startRelease : "Release 7",
-			endRelease : "Release 9",
-			hardeningSprints : "1",
-			epicStoryId : "I1099"
-		}
+		// defaultSettings : {
+		// 	typeName : "PortfolioItem/Initiative",
+		// 	startRelease : "Release 7",
+		// 	endRelease : "Release 9",
+		// 	hardeningSprints : "1",
+		// 	epicStoryId : "I1099"
+		// }
 
 	},
 
